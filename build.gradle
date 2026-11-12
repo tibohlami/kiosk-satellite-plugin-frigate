@@ -1,0 +1,69 @@
+plugins {
+    id 'java'
+}
+
+group = 'com.kiosksatellite.plugin'
+version = '1.0.0'
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_1_8
+    targetCompatibility = JavaVersion.VERSION_1_8
+}
+
+repositories {
+    mavenCentral()
+    google()
+}
+
+dependencies {
+    // Only compile against Android and Kiosk Satellite stubs; at runtime host provides them
+    compileOnly 'com.google.android:android:4.1.1.4'
+    compileOnly 'androidx.annotation:annotation:1.7.0'
+
+    // Unit test dependencies
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20231013'
+}
+
+jar {
+    archiveFileName = 'plugin.jar'
+    // Exclude SDK stubs from the packaged JAR so they don't conflict with host classes
+    exclude 'com/kiosksatellite/plugin/api/**'
+    exclude 'android/**'
+}
+
+task packagePlugin(type: Zip, dependsOn: jar) {
+    archiveFileName = "${project.name}-${project.version}.zip"
+    destinationDirectory = file("${buildDir}/distributions")
+
+    from(jar.archiveFile) {
+        into ''
+    }
+    from('kiosk-satellite-plugin.json') {
+        into ''
+    }
+    if (file('LICENSE').exists()) {
+        from('LICENSE') {
+            into ''
+        }
+    }
+    if (file('assets').exists()) {
+        from('assets') {
+            into 'assets'
+        }
+    }
+
+    doLast {
+        // Calculate SHA-256 checksum for Kiosk Satellite Plugin Manager verification
+        def zipFile = archiveFile.get().asFile
+        if (zipFile.exists()) {
+            def checksum = java.security.MessageDigest.getInstance("SHA-256")
+                .digest(zipFile.bytes)
+                .encodeHex()
+                .toString()
+            def checksumFile = new File(zipFile.parentFile, "${zipFile.name}.sha256")
+            checksumFile.text = checksum
+            println "Packaged: ${zipFile.name} (SHA-256: ${checksum})"
+        }
+    }
+}

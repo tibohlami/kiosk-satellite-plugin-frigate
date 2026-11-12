@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Frigate Explorer</string>
+
+    <string name="common_close">Fermer</string>
+    <string name="common_cancel">Annuler</string>
+    <string name="common_ok">OK</string>
+    <string name="common_today">Aujourd\'hui</string>
+    <string name="common_yesterday">Hier</string>
+    <string name="common_unknown_date">Date inconnue</string>
+    <string name="common_live">DIRECT</string>
+    <string name="common_realtime_live">Temps réel (Direct)</string>
+    <string name="common_camera_fallback">Caméra</string>
+    <string name="common_connected">Connecté</string>
+    <string name="common_loading">Chargement…</string>
+    <string name="common_preview_badge">APERÇU</string>
+
+    <string name="object_generic">Objet</string>
+    <string name="object_person">Personne</string>
+    <string name="object_car">Voiture</string>
+    <string name="object_vehicle">Véhicule</string>
+    <string name="object_truck">Camion</string>
+    <string name="object_motorcycle">Moto</string>
+    <string name="object_dog">Chien</string>
+    <string name="object_cat">Chat</string>
+    <string name="object_bird">Oiseau</string>
+    <string name="object_package">Colis</string>
+    <string name="object_bicycle">Vélo</string>
+
+    <string name="tab_home">Accueil</string>
+    <string name="tab_events">Événements</string>
+    <string name="section_last_events">Derniers événements</string>
+    <string name="section_last_events_count">Derniers événements (%1$d)</string>
+    <string name="section_cameras">Caméras</string>
+    <string name="section_cameras_count">Caméras (%1$d)</string>
+    <string name="explorer_loading_events">Chargement des événements Frigate…</string>
+    <string name="explorer_error_loading">⚠️ Erreur de chargement : %1$s</string>
+    <string name="explorer_no_events_filter">Aucun événement détecté pour ce filtre.</string>
+    <string name="explorer_searching_cameras">Recherche des caméras Frigate…</string>
+    <string name="camera_btn_events">Événements</string>
+    <string name="camera_btn_live">Direct</string>
+
+    <string name="browser_filter_camera">Caméra :</string>
+    <string name="browser_filter_type">Type :</string>
+    <string name="browser_filter_object">Objet :</string>
+    <string name="browser_type_alerts">Alertes</string>
+    <string name="browser_type_detections">Détections</string>
+    <string name="browser_badge_alert">Alerte</string>
+    <string name="browser_badge_detection">Détect.</string>
+    <string name="browser_badge_no_video">Sans vidéo</string>
+    <string name="browser_calendar_title">Sélectionner un jour</string>
+    <string name="browser_calendar_all_days">Tous les jours</string>
+    <string name="browser_weekday_mon">Lun</string>
+    <string name="browser_weekday_tue">Mar</string>
+    <string name="browser_weekday_wed">Mer</string>
+    <string name="browser_weekday_thu">Jeu</string>
+    <string name="browser_weekday_fri">Ven</string>
+    <string name="browser_weekday_sat">Sam</string>
+    <string name="browser_weekday_sun">Dim</string>
+    <string name="browser_loading_events">Chargement des événements…</string>
+    <string name="browser_no_events_filters">Aucun événement trouvé pour ces filtres.</string>
+    <string name="browser_load_failed">Impossible de charger les événements Frigate.</string>
+    <string name="browser_load_more">Charger des événements plus anciens</string>
+    <string name="browser_count_singular">%1$d événement</string>
+    <string name="browser_count_plural">%1$d événements</string>
+    <string name="browser_zoom_out_desc">Zoom arrière</string>
+    <string name="browser_zoom_in_desc">Zoom avant</string>
+
+    <string name="player_rewind_10">-10s</string>
+    <string name="player_forward_10">+10s</string>
+    <string name="player_sound_on">Son</string>
+    <string name="player_sound_muted">Muet</string>
+    <string name="player_boxes">Cadres</string>
+    <string name="player_loop">Boucle</string>
+    <string name="player_scrub_preview">%1$s  •  Aperçu</string>
+    <string name="player_error_default">Impossible de lire le clip vidéo.\nAppuyez pour réessayer.</string>
+    <string name="player_error_live_interrupted">Flux direct interrompu (%1$s).\nAppuyez pour réessayer.</string>
+    <string name="player_error_video_code">Impossible de lire le clip vidéo (code %1$d).</string>
+    <string name="player_error_codec_1010">Format non supporté par le lecteur natif Android (-1010).\nAudio PCM/G.711 de la caméra incompatible avec MP4 natif.\nConseil : activez \'preset-record-generic-audio-aac\' dans Frigate.\n\nAffichage du snapshot HD :</string>
+    <string name="player_error_video_expired_kept">Enregistrement vidéo expiré ou supprimé pour cet événement.\nAperçu conservé :</string>
+    <string name="player_error_video_expired_avail">Enregistrement vidéo expiré ou indisponible pour cet événement.\nAperçu disponible :</string>
+    <string name="player_error_download_failed">Impossible de télécharger le clip (%1$s).\nAppuyez pour réessayer.</string>
+    <string name="player_error_file_too_small">Fichier trop court (%1$d octets)</string>
+
+    <string name="event_today_time">Aujourd\'hui %1$s</string>
+    <string name="event_yesterday_time">Hier %1$s</string>
+    <string name="duration_seconds">%1$ds</string>
+    <string name="duration_minutes_seconds">%1$dm %2$ds</string>
+
+    <string name="plugin_testing_connection">Test de connexion à %1$s…</string>
+    <string name="plugin_status_connected_url">Connecté à Frigate (%1$s)</string>
+    <string name="plugin_sensor_connected">Connecté</string>
+    <string name="plugin_sensor_error">Erreur</string>
+    <string name="plugin_sensor_loading">Chargement…</string>
+    <string name="plugin_sensor_unavailable">Indisponible</string>
+    <string name="plugin_sensor_none">Aucune</string>
+    <string name="plugin_explorer_opened">Frigate Explorer ouvert.</string>
+
+    <string name="api_err_no_credentials">Nom d\'utilisateur et mot de passe non configurés.</string>
+    <string name="api_login_session_active">Session active.</string>
+    <string name="api_login_succeeded">Connexion réussie.</string>
+    <string name="api_login_no_token">La connexion a renvoyé HTTP %1$d sans jeton de session.</string>
+    <string name="api_login_invalid_creds">Échec de connexion (HTTP %1$d). Vérifiez l\'identifiant et le mot de passe.</string>
+    <string name="api_login_http_error">Échec de connexion (HTTP %1$d %2$s).</string>
+    <string name="api_err_invalid_url_host">URL Frigate invalide : nom d\'hôte manquant.</string>
+    <string name="api_err_invalid_url">URL Frigate invalide : %1$s</string>
+    <string name="api_err_auth_rejected">Authentification refusée (HTTP %1$d). Saisissez identifiant/mot de passe ou un jeton Bearer valide.</string>
+    <string name="api_err_http_config">L\'API Frigate a renvoyé HTTP %1$d %2$s sur /api/config.</string>
+    <string name="api_tls_https_untrusted">HTTPS (certificat non fiable autorisé)</string>
+    <string name="api_tls_https_verified">HTTPS (vérifié)</string>
+    <string name="api_auth_token">auth par jeton</string>
+    <string name="api_auth_login_ok">connexion OK</string>
+    <string name="api_auth_open">accès libre</string>
+    <string name="api_conn_summary_singular">Connecté à Frigate — %1$d caméra, %2$s, %3$s.</string>
+    <string name="api_conn_summary_plural">Connecté à Frigate — %1$d caméras, %2$s, %3$s.</string>
+    <string name="api_err_ssl_hint"> Activez \'Accepter les certificats SSL non fiables\' si vous utilisez un certificat auto-signé.</string>
+    <string name="api_err_ssl">Erreur SSL/TLS : %1$s%2$s</string>
+    <string name="api_err_timeout">Délai d\'attente dépassé : %1$s</string>
+    <string name="api_err_unreachable">Serveur inaccessible : %1$s</string>
+    <string name="api_err_conn_failed">Échec de connexion : %1$s</string>
+    <string name="api_err_unknown">Erreur inconnue</string>
+</resources>

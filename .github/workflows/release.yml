@@ -1,0 +1,46 @@
+name: Release Plugin Bundle
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Build plugin package
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            python3 package_plugin.py --version "${GITHUB_REF_NAME#v}"
+          else
+            python3 package_plugin.py
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            dist/kiosk-satellite-plugin.json
+            dist/*.zip
+            dist/*.sha256
+          generate_release_notes: true

@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Frigate Explorer</string>
+
+    <string name="common_close">Close</string>
+    <string name="common_cancel">Cancel</string>
+    <string name="common_ok">OK</string>
+    <string name="common_today">Today</string>
+    <string name="common_yesterday">Yesterday</string>
+    <string name="common_unknown_date">Unknown date</string>
+    <string name="common_live">LIVE</string>
+    <string name="common_realtime_live">Real-time (Live)</string>
+    <string name="common_camera_fallback">Camera</string>
+    <string name="common_connected">Connected</string>
+    <string name="common_loading">Loading…</string>
+    <string name="common_preview_badge">PREVIEW</string>
+
+    <string name="object_generic">Object</string>
+    <string name="object_person">Person</string>
+    <string name="object_car">Car</string>
+    <string name="object_vehicle">Vehicle</string>
+    <string name="object_truck">Truck</string>
+    <string name="object_motorcycle">Motorcycle</string>
+    <string name="object_dog">Dog</string>
+    <string name="object_cat">Cat</string>
+    <string name="object_bird">Bird</string>
+    <string name="object_package">Package</string>
+    <string name="object_bicycle">Bicycle</string>
+
+    <string name="tab_home">Home</string>
+    <string name="tab_events">Events</string>
+    <string name="section_last_events">Last Events</string>
+    <string name="section_last_events_count">Last Events (%1$d)</string>
+    <string name="section_cameras">Cameras</string>
+    <string name="section_cameras_count">Cameras (%1$d)</string>
+    <string name="explorer_loading_events">Loading Frigate events…</string>
+    <string name="explorer_error_loading">⚠️ Loading error: %1$s</string>
+    <string name="explorer_no_events_filter">No events detected for this filter.</string>
+    <string name="explorer_searching_cameras">Searching for Frigate cameras…</string>
+    <string name="camera_btn_events">Events</string>
+    <string name="camera_btn_live">Live</string>
+
+    <string name="browser_filter_camera">Camera:</string>
+    <string name="browser_filter_type">Type:</string>
+    <string name="browser_filter_object">Object:</string>
+    <string name="browser_type_alerts">Alerts</string>
+    <string name="browser_type_detections">Detections</string>
+    <string name="browser_badge_alert">Alert</string>
+    <string name="browser_badge_detection">Detect.</string>
+    <string name="browser_badge_no_video">No video</string>
+    <string name="browser_calendar_title">Select a day</string>
+    <string name="browser_calendar_all_days">All days</string>
+    <string name="browser_weekday_mon">Mon</string>
+    <string name="browser_weekday_tue">Tue</string>
+    <string name="browser_weekday_wed">Wed</string>
+    <string name="browser_weekday_thu">Thu</string>
+    <string name="browser_weekday_fri">Fri</string>
+    <string name="browser_weekday_sat">Sat</string>
+    <string name="browser_weekday_sun">Sun</string>
+    <string name="browser_loading_events">Loading events…</string>
+    <string name="browser_no_events_filters">No events found for these filters.</string>
+    <string name="browser_load_failed">Unable to load Frigate events.</string>
+    <string name="browser_load_more">Load older events</string>
+    <string name="browser_count_singular">%1$d event</string>
+    <string name="browser_count_plural">%1$d events</string>
+    <string name="browser_zoom_out_desc">Zoom out</string>
+    <string name="browser_zoom_in_desc">Zoom in</string>
+
+    <string name="player_rewind_10">-10s</string>
+    <string name="player_forward_10">+10s</string>
+    <string name="player_sound_on">Sound</string>
+    <string name="player_sound_muted">Muted</string>
+    <string name="player_boxes">Boxes</string>
+    <string name="player_loop">Loop</string>
+    <string name="player_scrub_preview">%1$s  •  Preview</string>
+    <string name="player_error_default">Unable to load video clip.\nTap to retry.</string>
+    <string name="player_error_live_interrupted">Live stream interrupted (%1$s).\nTap to retry.</string>
+    <string name="player_error_video_code">Unable to play video clip (code %1$d).</string>
+    <string name="player_error_codec_1010">Format not supported by native Android player (-1010).\nCamera PCM/G.711 audio is incompatible with native MP4.\nTip: enable \'preset-record-generic-audio-aac\' in Frigate.\n\nShowing HD snapshot:</string>
+    <string name="player_error_video_expired_kept">Video recording expired or deleted for this event.\nSaved preview:</string>
+    <string name="player_error_video_expired_avail">Video recording expired or unavailable for this event.\nAvailable preview:</string>
+    <string name="player_error_download_failed">Unable to download clip (%1$s).\nTap to retry.</string>
+    <string name="player_error_file_too_small">File too small (%1$d bytes)</string>
+
+    <string name="event_today_time">Today %1$s</string>
+    <string name="event_yesterday_time">Yesterday %1$s</string>
+    <string name="duration_seconds">%1$ds</string>
+    <string name="duration_minutes_seconds">%1$dm %2$ds</string>
+
+    <string name="plugin_testing_connection">Testing connection to %1$s…</string>
+    <string name="plugin_status_connected_url">Connected to Frigate (%1$s)</string>
+    <string name="plugin_sensor_connected">Connected</string>
+    <string name="plugin_sensor_error">Error</string>
+    <string name="plugin_sensor_loading">Loading…</string>
+    <string name="plugin_sensor_unavailable">Unavailable</string>
+    <string name="plugin_sensor_none">None</string>
+    <string name="plugin_explorer_opened">Frigate Explorer opened.</string>
+
+    <string name="api_err_no_credentials">Username and password are not configured.</string>
+    <string name="api_login_session_active">Session active.</string>
+    <string name="api_login_succeeded">Login succeeded.</string>
+    <string name="api_login_no_token">Login returned HTTP %1$d without a session token.</string>
+    <string name="api_login_invalid_creds">Login failed (HTTP %1$d). Check username and password.</string>
+    <string name="api_login_http_error">Login failed (HTTP %1$d %2$s).</string>
+    <string name="api_err_invalid_url_host">Invalid Frigate URL: missing hostname.</string>
+    <string name="api_err_invalid_url">Invalid Frigate URL: %1$s</string>
+    <string name="api_err_auth_rejected">Authentication rejected (HTTP %1$d). Enter username/password or a valid Bearer token.</string>
+    <string name="api_err_http_config">Frigate API returned HTTP %1$d %2$s on /api/config.</string>
+    <string name="api_tls_https_untrusted">HTTPS (untrusted cert allowed)</string>
+    <string name="api_tls_https_verified">HTTPS (verified)</string>
+    <string name="api_auth_token">token auth</string>
+    <string name="api_auth_login_ok">login OK</string>
+    <string name="api_auth_open">open access</string>
+    <string name="api_conn_summary_singular">Connected to Frigate — %1$d camera, %2$s, %3$s.</string>
+    <string name="api_conn_summary_plural">Connected to Frigate — %1$d cameras, %2$s, %3$s.</string>
+    <string name="api_err_ssl_hint"> Enable \'Accept untrusted SSL certificates\' if using a self-signed cert.</string>
+    <string name="api_err_ssl">SSL/TLS error: %1$s%2$s</string>
+    <string name="api_err_timeout">Connection timed out: %1$s</string>
+    <string name="api_err_unreachable">Server unreachable: %1$s</string>
+    <string name="api_err_conn_failed">Connection failed: %1$s</string>
+    <string name="api_err_unknown">Unknown error</string>
+</resources>
