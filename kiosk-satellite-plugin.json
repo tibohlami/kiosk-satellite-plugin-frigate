@@ -2,11 +2,11 @@
   "schemaVersion": 1,
   "id": "kiosk-satellite-frigate",
   "name": "Frigate NVR Explorer",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "apiVersion": 1,
   "minAndroidSdk": 24,
   "minAppVersion": "2026.10.40",
-  "entryClass": "me.jxl.kiosk.plugins.frigate.FrigatePlugin",
+  "entryClass": "io.github.tibohlami.ksplugins.frigate.FrigatePlugin",
   "description": "Native Frigate NVR camera viewer with live streams, events & reviews browser, clip playback with detection boxes, and recording timeline scrubbing for Kiosk Satellite.",
   "author": "tibohlami",
   "license": "Apache-2.0",
@@ -56,6 +56,14 @@
       "title": "Accept untrusted SSL certificates",
       "default": false,
       "description": "Allow self-signed or invalid HTTPS certificates for local Frigate servers (e.g. port 8971). Enable only on trusted local networks."
+    },
+    {
+      "key": "debugLogging",
+      "group": "Connection",
+      "type": "boolean",
+      "title": "Debug logging",
+      "default": false,
+      "description": "Enable verbose debug logging for plugin operations in Kiosk Satellite application log"
     },
     {
       "key": "language",

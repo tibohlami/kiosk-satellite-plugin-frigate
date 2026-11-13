@@ -2,8 +2,8 @@ plugins {
     id 'java'
 }
 
-group = 'com.kiosksatellite.plugin'
-version = '1.0.0'
+group = 'io.github.tibohlami.ksplugins'
+version = '1.0.1'
 
 java {
     sourceCompatibility = JavaVersion.VERSION_1_8

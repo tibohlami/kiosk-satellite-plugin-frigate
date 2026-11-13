@@ -25,19 +25,19 @@ import java.util.jar.JarFile;
 
 /**
  * Repackages (shades) Media3, AndroidX, Guava, and Kotlin classes under
- * me/jxl/kiosk/plugins/frigate/shaded/... so plugin DEX classes never collide
+ * io/github/tibohlami/ksplugins/frigate/shaded/... so plugin DEX classes never collide
  * with R8-minified classes in the host Kiosk Satellite APK.
  */
 public final class ShadeDependencies {
 
     private static final String[][] PREFIX_RULES = {
-            {"androidx/", "me/jxl/kiosk/plugins/frigate/shaded/androidx/"},
-            {"android/support/v4/", "me/jxl/kiosk/plugins/frigate/shaded/support/v4/"},
-            {"com/google/common/", "me/jxl/kiosk/plugins/frigate/shaded/guava/"},
-            {"com/google/thirdparty/", "me/jxl/kiosk/plugins/frigate/shaded/thirdparty/"},
-            {"kotlin/", "me/jxl/kiosk/plugins/frigate/shaded/kotlin/"},
-            {"org/intellij/lang/", "me/jxl/kiosk/plugins/frigate/shaded/jetbrains/intellij/"},
-            {"org/jetbrains/annotations/", "me/jxl/kiosk/plugins/frigate/shaded/jetbrains/annotations/"}
+            {"androidx/", "io/github/tibohlami/ksplugins/frigate/shaded/androidx/"},
+            {"android/support/v4/", "io/github/tibohlami/ksplugins/frigate/shaded/support/v4/"},
+            {"com/google/common/", "io/github/tibohlami/ksplugins/frigate/shaded/guava/"},
+            {"com/google/thirdparty/", "io/github/tibohlami/ksplugins/frigate/shaded/thirdparty/"},
+            {"kotlin/", "io/github/tibohlami/ksplugins/frigate/shaded/kotlin/"},
+            {"org/intellij/lang/", "io/github/tibohlami/ksplugins/frigate/shaded/jetbrains/intellij/"},
+            {"org/jetbrains/annotations/", "io/github/tibohlami/ksplugins/frigate/shaded/jetbrains/annotations/"}
     };
 
     public static void main(String[] args) throws Exception {

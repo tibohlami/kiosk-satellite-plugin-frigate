@@ -2,7 +2,7 @@
 
 Native Frigate NVR camera viewer with live streams, events & reviews browser, clip playback with detection boxes, and recording timeline scrubbing for [Kiosk Satellite](https://github.com/jxlarrea/kiosk-satellite).
 
-![Frigate NVR Explorer for Kiosk Satellite](docs/banner.jpg)
+![Frigate NVR Explorer for Kiosk Satellite](docs/banner_small.jpg)
 
 ---
 
@@ -34,9 +34,9 @@ Native Frigate NVR camera viewer with live streams, events & reviews browser, cl
 
 | Home — Cameras & Last Events | Events & Reviews Browser |
 | :---: | :---: |
-| ![Home — Cameras & Last Events](docs/screenshot-home.jpg) | ![Events & Reviews Browser](docs/screenshot-events.jpg) |
+| ![Home — Cameras & Last Events](docs/screenshot-home_small.jpg) | ![Events & Reviews Browser](docs/screenshot-events_small.jpg) |
 | **Live Stream & Timeline** | **Event Playback & Object Bounding Boxes** |
-| ![Live Stream & Timeline](docs/screenshot-live.jpg) | ![Event Playback & Object Bounding Boxes](docs/screenshot-player-boxes.jpg) |
+| ![Live Stream & Timeline](docs/screenshot-live_small.jpg) | ![Event Playback & Object Bounding Boxes](docs/screenshot-player-boxes_small.jpg) |
 
 ---
 
@@ -77,6 +77,7 @@ Open **Settings > Plugin Manager > Frigate NVR Explorer > Settings** in Kiosk Sa
 | **Frigate Password** | `password` | *(empty)* | Optional password used with `username` for `/api/login` session authentication. |
 | **Bearer Token / JWT** | `authToken` | *(empty)* | Optional manual Bearer token override (leave empty when using username/password or unauthenticated port `5000`). |
 | **Accept untrusted SSL certificates** | `allowInsecureSsl` | `false` | Allows self-signed or untrusted local HTTPS/WSS certificates (use only on trusted local networks). |
+| **Debug logging** | `debugLogging` | `false` | Enables verbose debug logging for plugin operations in Kiosk Satellite application log. |
 | **Test connection** *(button)* | `testConnection` | — | Verifies URL reachability, TLS validation, authentication, and `/api/config` camera access. |
 
 ### Interface
@@ -110,9 +111,21 @@ Open **Settings > Plugin Manager > Frigate NVR Explorer > Settings** in Kiosk Sa
 
 ## Privacy & Data Handling
 
-- **Direct Local Communication Only**: All network requests (Frigate REST API calls, thumbnails, snapshots, HLS VOD segments, MP4 clips, and go2rtc WebSocket streams) are sent **exclusively** to the Frigate Server URL you configure in settings.
-- **No External Telemetry or Third-Party Servers**: This plugin does not collect analytics, telemetry, or diagnostics and does not transmit data to any external service.
-- **Local Storage & Cache**: Configuration values (including credentials/tokens) are stored inside Kiosk Satellite's plugin settings store. Temporary fallback MP4 clip downloads are stored strictly inside Kiosk Satellite's private cache directory (`frigate_clips_cache`, automatically pruned to the most recent files).
+- **Local Network Scope**:
+  - **Configured Server**: Video streams, event metadata, recordings, and snapshots are fetched directly from your configured Frigate URL.
+  - **Auto-Detection Probes**: On initial startup or when no server is configured, the plugin may query Home Assistant (`config_entries/get` and `config` to discover HA's `internal_url`), probe the Home Assistant host on ports `5000` (Frigate default HTTP) and `8971` (Frigate authenticated HTTPS), and probe `http://frigate.local:5000` to automatically discover your instance.
+  - **Redirects & Thumbnails**: The plugin follows HTTP redirects and absolute `thumb_path` URLs specified by Frigate review records. Authentication headers (`Authorization` and `Cookie`) are strictly restricted to the configured Frigate host and are never forwarded to third-party domains.
+  - **Cookies**: When streaming via WebView (MSE/HLS), a session cookie (`frigate_token`) is set on the Frigate domain for video playback authentication. This cookie is automatically removed when the stream closes and when the plugin is stopped.
+- **No External Telemetry or Analytics**: The plugin does not collect analytics or crash diagnostics and communicates only within your local network.
+- **Local Storage & Cache**:
+  - Credentials and settings are stored in Kiosk Satellite's secure plugin preferences.
+  - Temporary fallback MP4 clip downloads are stored in Kiosk Satellite's cache folder as `frigate_*.mp4` (strictly pruned to the 8 most recent clips, and cleared when the plugin is stopped).
+
+---
+
+## Disclaimer
+
+This project is an independent community plugin and is not affiliated with, authorized, maintained, sponsored, or endorsed by Frigate NVR, go2rtc, Home Assistant, or Kiosk Satellite. All trademarks and registered trademarks are the property of their respective owners.
 
 ---
 
