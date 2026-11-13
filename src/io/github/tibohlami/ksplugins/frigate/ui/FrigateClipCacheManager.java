@@ -219,6 +219,11 @@ public class FrigateClipCacheManager {
                         throw new RuntimeException("HTTP " + code + " " + conn.getResponseMessage());
                     }
 
+                    long declaredLength = conn.getContentLengthLong();
+                    if (declaredLength > MAX_CLIP_DOWNLOAD_BYTES) {
+                        throw new RuntimeException("Clip size (" + (declaredLength / (1024 * 1024)) + " MB) exceeds 50 MB limit");
+                    }
+
                     long totalBytes = 0L;
                     try (InputStream in = conn.getInputStream();
                          FileOutputStream out = new FileOutputStream(tempFile)) {
