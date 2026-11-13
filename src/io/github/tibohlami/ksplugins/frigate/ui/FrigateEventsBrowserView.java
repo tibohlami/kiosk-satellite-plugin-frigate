@@ -10,6 +10,8 @@ import android.os.Handler;
 import android.os.Looper;
 import android.view.Gravity;
 import android.view.View;
+import android.view.ViewParent;
+import android.view.ViewTreeObserver;
 import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
@@ -31,6 +33,7 @@ import java.util.Calendar;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -79,6 +82,46 @@ public class FrigateEventsBrowserView {
     private final Map<String, View> cardViewMap = new LinkedHashMap<>();
     private final Map<String, View> cardHighlightMap = new LinkedHashMap<>();
     private final Map<String, String> cardSeverityMap = new HashMap<>();
+    private final Map<ImageView, String> pendingThumbnails = new LinkedHashMap<>();
+    private ViewTreeObserver.OnScrollChangedListener scrollThumbListener;
+
+    private boolean isTimelineScrubbing = false;
+    private final List<FrigateEvent> pendingCardsToAppend = new ArrayList<>();
+    private boolean hasPendingInitialCardsDuringScrub = false;
+    private boolean pendingRebuildFilterChips = false;
+
+    private String lastRenderedDayKey = null;
+    private LinearLayout lastRenderedRow = null;
+    private int lastColIdx = 0;
+    private int lastGridColumns = 2;
+    private int lastGridColGap = 0;
+    private int lastGridCardHeight = 0;
+
+    private final Runnable pendingTimelineScrollRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (isDestroyed || timelineRuler == null) return;
+            flushPendingCardsAndFilters();
+            maybeLoadMoreForViewport();
+            scrollToEpoch(timelineRuler.getCursorEpoch());
+        }
+    };
+
+    private void flushPendingCardsAndFilters() {
+        if (hasPendingInitialCardsDuringScrub) {
+            hasPendingInitialCardsDuringScrub = false;
+            pendingCardsToAppend.clear();
+            renderEventCards(false);
+        } else if (!pendingCardsToAppend.isEmpty()) {
+            List<FrigateEvent> toAppend = new ArrayList<>(pendingCardsToAppend);
+            pendingCardsToAppend.clear();
+            appendEventCards(toAppend);
+        }
+        if (pendingRebuildFilterChips) {
+            pendingRebuildFilterChips = false;
+            rebuildFilterChips();
+        }
+    }
 
     private volatile boolean isDestroyed = false;
 
@@ -183,6 +226,9 @@ public class FrigateEventsBrowserView {
         eventsScrollView = new ScrollView(context);
         eventsScrollView.setVerticalScrollBarEnabled(true);
         eventsScrollView.setFillViewport(true);
+        eventsScrollView.setOnScrollChangeListener((v, scrollX, scrollY, oldScrollX, oldScrollY) -> checkAndLoadVisibleThumbnails());
+        scrollThumbListener = this::checkAndLoadVisibleThumbnails;
+        eventsScrollView.getViewTreeObserver().addOnScrollChangedListener(scrollThumbListener);
 
         eventsListCol = new LinearLayout(context);
         eventsListCol.setOrientation(LinearLayout.VERTICAL);
@@ -267,6 +313,16 @@ public class FrigateEventsBrowserView {
 
     public void onDestroy() {
         isDestroyed = true;
+        mainHandler.removeCallbacks(pendingTimelineScrollRunnable);
+        if (eventsScrollView != null && scrollThumbListener != null) {
+            try {
+                if (eventsScrollView.getViewTreeObserver().isAlive()) {
+                    eventsScrollView.getViewTreeObserver().removeOnScrollChangedListener(scrollThumbListener);
+                }
+            } catch (Throwable ignored) {}
+            scrollThumbListener = null;
+        }
+        pendingThumbnails.clear();
         repository.destroy();
         calendarModal.close(rootView);
         mainHandler.removeCallbacksAndMessages(null);
@@ -529,18 +585,27 @@ public class FrigateEventsBrowserView {
         updateTimelineDateHeader(now);
         timelineRuler.setOnScrubListener(new FrigateTimelineRulerView.OnScrubListener() {
             @Override
-            public void onScrubStart(long epochSeconds) {}
+            public void onScrubStart(long epochSeconds) {
+                isTimelineScrubbing = true;
+                mainHandler.removeCallbacks(pendingTimelineScrollRunnable);
+            }
 
             @Override
             public void onScrubChanged(long epochSeconds) {
                 updateTimelineDateHeader(epochSeconds);
                 maybeLoadMoreForViewport();
+                mainHandler.removeCallbacks(pendingTimelineScrollRunnable);
+                mainHandler.postDelayed(pendingTimelineScrollRunnable, 300);
             }
 
             @Override
             public void onScrubEnd(long epochSeconds) {
+                isTimelineScrubbing = false;
+                mainHandler.removeCallbacks(pendingTimelineScrollRunnable);
                 updateTimelineDateHeader(epochSeconds);
+                flushPendingCardsAndFilters();
                 maybeLoadMoreForViewport();
+                scrollToEpoch(epochSeconds);
             }
 
             @Override
@@ -671,8 +736,12 @@ public class FrigateEventsBrowserView {
         } else {
             updateStatus(null, false);
         }
-        renderEventCards(false);
-        syncTimelineRulerData(isInitialPage);
+        if (isInitialPage) {
+            renderEventCards(false);
+            syncTimelineRulerData(isInitialPage);
+        } else if (loadMoreBtn != null) {
+            loadMoreBtn.setVisibility(View.GONE);
+        }
     }
 
     private void handleLoadError(boolean isInitialPage) {
@@ -702,13 +771,34 @@ public class FrigateEventsBrowserView {
         Collections.sort(displayedEvents, (a, b) -> Double.compare(b.getStartTime(), a.getStartTime()));
 
         if (labelsAdded) {
-            rebuildFilterChips();
+            if (!isTimelineScrubbing) {
+                rebuildFilterChips();
+            } else {
+                pendingRebuildFilterChips = true;
+            }
         }
 
         updateStatus(displayedEvents.isEmpty() ? tr("browser_no_events_filters") : null,
                 displayedEvents.isEmpty());
-        renderEventCards(!isInitialPage);
+
+        // Always sync the timeline ruler immediately so event bands appear in real-time on canvas!
         syncTimelineRulerData(isInitialPage);
+
+        // Defer heavy card View creation if the user is actively dragging the timeline
+        if (isTimelineScrubbing) {
+            if (isInitialPage) {
+                hasPendingInitialCardsDuringScrub = true;
+                pendingCardsToAppend.clear();
+            } else if (uniqueNewEvents != null) {
+                pendingCardsToAppend.addAll(uniqueNewEvents);
+            }
+        } else {
+            if (isInitialPage || eventsListCol == null || eventsListCol.getChildCount() == 0 || lastGridCardHeight <= 0) {
+                renderEventCards(false);
+            } else {
+                appendEventCards(uniqueNewEvents);
+            }
+        }
     }
 
     private void syncTimelineRulerData(boolean recenterToLatest) {
@@ -756,7 +846,8 @@ public class FrigateEventsBrowserView {
         double oldest = repository.getOldestFetchedStartTime();
         if (timelineRuler == null || repository.isLoadingPage() || !repository.hasMoreOlder() || oldest <= 0.0) return;
         long bottom = timelineRuler.getVisibleBottomEpoch();
-        if (bottom <= (long) oldest + 300L) {
+        long lookaheadSec = Math.max(1800L, (long) (timelineRuler.getVisibleWindowSeconds() * 0.5));
+        if (bottom <= (long) oldest + lookaheadSec) {
             loadOlderPage();
         }
     }
@@ -790,7 +881,11 @@ public class FrigateEventsBrowserView {
         cardViewMap.clear();
         cardHighlightMap.clear();
         cardSeverityMap.clear();
+        pendingThumbnails.clear();
         loadMoreBtn = null;
+        lastRenderedDayKey = null;
+        lastRenderedRow = null;
+        lastColIdx = 0;
 
         if (displayedEvents.isEmpty()) {
             return;
@@ -798,68 +893,114 @@ public class FrigateEventsBrowserView {
 
         android.util.DisplayMetrics dm = context.getResources().getDisplayMetrics();
         int approxGridWidth = Math.max(s(360), dm.widthPixels - s(32) - s(106) - s(16));
-        int columns = Math.max(2, Math.min(4, approxGridWidth / s(205)));
-        int colGap = s(10);
-        int cardWidth = Math.max(s(145), (approxGridWidth - (colGap * (columns - 1))) / columns);
-        int cardHeight = Math.max(s(112), Math.round(cardWidth * 0.68f));
-
-        String currentDayKey = null;
-        LinearLayout currentRow = null;
-        int colIdx = 0;
+        lastGridColumns = Math.max(2, Math.min(4, approxGridWidth / s(205)));
+        lastGridColGap = s(10);
+        int cardWidth = Math.max(s(145), (approxGridWidth - (lastGridColGap * (lastGridColumns - 1))) / lastGridColumns);
+        lastGridCardHeight = Math.max(s(112), Math.round(cardWidth * 0.68f));
 
         for (FrigateEvent ev : displayedEvents) {
-            String dayKey = formatDaySectionTitle(ev.getStartTime());
-            if (!dayKey.equals(currentDayKey)) {
-                padRemainingRowColumns(currentRow, colIdx, columns, colGap);
-                currentDayKey = dayKey;
-                colIdx = 0;
-                currentRow = null;
-                eventsListCol.addView(buildDayHeader(dayKey));
-            }
-
-            if (colIdx % columns == 0) {
-                currentRow = new LinearLayout(context);
-                currentRow.setOrientation(LinearLayout.HORIZONTAL);
-                LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-                rowLp.bottomMargin = s(10);
-                eventsListCol.addView(currentRow, rowLp);
-            }
-
-            View card = buildEventCard(ev, cardHeight);
-            LinearLayout.LayoutParams itemLp = new LinearLayout.LayoutParams(0, cardHeight, 1.0f);
-            if ((colIdx % columns) < (columns - 1)) {
-                itemLp.rightMargin = colGap;
-            }
-            currentRow.addView(card, itemLp);
-            colIdx++;
+            appendSingleEventCard(ev);
         }
-        padRemainingRowColumns(currentRow, colIdx, columns, colGap);
-
-        if (repository.hasMoreOlder()) {
-            loadMoreBtn = new TextView(context);
-            loadMoreBtn.setText(repository.isLoadingPage() ? tr("common_loading") : tr("browser_load_more"));
-            loadMoreBtn.setEnabled(!repository.isLoadingPage());
-            loadMoreBtn.setTextSize(sp(13));
-            loadMoreBtn.setTextColor(Color.parseColor("#E2E8F0"));
-            loadMoreBtn.setGravity(Gravity.CENTER);
-            GradientDrawable btnBg = new GradientDrawable();
-            btnBg.setColor(Color.parseColor("#182030"));
-            btnBg.setCornerRadius(s(10));
-            btnBg.setStroke(s(1), Color.parseColor("#2A374F"));
-            loadMoreBtn.setBackground(btnBg);
-            loadMoreBtn.setPadding(s(16), s(10), s(16), s(10));
-            LinearLayout.LayoutParams lmLp = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-            lmLp.topMargin = s(6);
-            loadMoreBtn.setOnClickListener(v -> loadOlderPage());
-            eventsListCol.addView(loadMoreBtn, lmLp);
-        }
-
+        padRemainingRowColumns(lastRenderedRow, lastColIdx, lastGridColumns, lastGridColGap);
+        ensureLoadMoreButton();
         updateCardHighlights();
 
         if (preserveScrollPosition && eventsScrollView != null && prevScrollY > 0) {
-            eventsScrollView.post(() -> eventsScrollView.scrollTo(0, prevScrollY));
+            eventsScrollView.post(() -> {
+                if (isDestroyed || eventsScrollView == null) return;
+                eventsScrollView.scrollTo(0, prevScrollY);
+                checkAndLoadVisibleThumbnails();
+            });
+        } else if (eventsScrollView != null) {
+            eventsScrollView.post(this::checkAndLoadVisibleThumbnails);
+        }
+    }
+
+    private void appendEventCards(List<FrigateEvent> newEvents) {
+        if (eventsListCol == null || newEvents == null || newEvents.isEmpty()) return;
+        if (eventsListCol.getChildCount() == 0 || lastGridCardHeight <= 0) {
+            renderEventCards(true);
+            return;
+        }
+
+        if (loadMoreBtn != null && loadMoreBtn.getParent() == eventsListCol) {
+            eventsListCol.removeView(loadMoreBtn);
+        }
+        removeSpacers(lastRenderedRow);
+
+        for (FrigateEvent ev : newEvents) {
+            appendSingleEventCard(ev);
+        }
+        padRemainingRowColumns(lastRenderedRow, lastColIdx, lastGridColumns, lastGridColGap);
+        ensureLoadMoreButton();
+        updateCardHighlights();
+
+        if (eventsScrollView != null) {
+            eventsScrollView.post(this::checkAndLoadVisibleThumbnails);
+        }
+    }
+
+    private void appendSingleEventCard(FrigateEvent ev) {
+        String dayKey = formatDaySectionTitle(ev.getStartTime());
+        if (!dayKey.equals(lastRenderedDayKey)) {
+            padRemainingRowColumns(lastRenderedRow, lastColIdx, lastGridColumns, lastGridColGap);
+            lastRenderedDayKey = dayKey;
+            lastColIdx = 0;
+            lastRenderedRow = null;
+            eventsListCol.addView(buildDayHeader(dayKey));
+        }
+
+        if (lastColIdx % lastGridColumns == 0) {
+            lastRenderedRow = new LinearLayout(context);
+            lastRenderedRow.setOrientation(LinearLayout.HORIZONTAL);
+            LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            rowLp.bottomMargin = s(10);
+            eventsListCol.addView(lastRenderedRow, rowLp);
+        }
+
+        View card = buildEventCard(ev, lastGridCardHeight);
+        LinearLayout.LayoutParams itemLp = new LinearLayout.LayoutParams(0, lastGridCardHeight, 1.0f);
+        if ((lastColIdx % lastGridColumns) < (lastGridColumns - 1)) {
+            itemLp.rightMargin = lastGridColGap;
+        }
+        lastRenderedRow.addView(card, itemLp);
+        lastColIdx++;
+    }
+
+    private void removeSpacers(LinearLayout row) {
+        if (row == null) return;
+        for (int i = row.getChildCount() - 1; i >= 0; i--) {
+            View child = row.getChildAt(i);
+            if ("spacer".equals(child.getTag())) {
+                row.removeViewAt(i);
+            }
+        }
+    }
+
+    private void ensureLoadMoreButton() {
+        if (repository.hasMoreOlder()) {
+            if (loadMoreBtn == null) {
+                loadMoreBtn = new TextView(context);
+                loadMoreBtn.setTextSize(sp(13));
+                loadMoreBtn.setTextColor(Color.parseColor("#E2E8F0"));
+                loadMoreBtn.setGravity(Gravity.CENTER);
+                GradientDrawable btnBg = new GradientDrawable();
+                btnBg.setColor(Color.parseColor("#182030"));
+                btnBg.setCornerRadius(s(10));
+                btnBg.setStroke(s(1), Color.parseColor("#2A374F"));
+                loadMoreBtn.setBackground(btnBg);
+                loadMoreBtn.setPadding(s(16), s(10), s(16), s(10));
+                loadMoreBtn.setOnClickListener(v -> loadOlderPage());
+            }
+            loadMoreBtn.setText(repository.isLoadingPage() ? tr("common_loading") : tr("browser_load_more"));
+            loadMoreBtn.setEnabled(!repository.isLoadingPage());
+            if (loadMoreBtn.getParent() == null) {
+                LinearLayout.LayoutParams lmLp = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                lmLp.topMargin = s(6);
+                eventsListCol.addView(loadMoreBtn, lmLp);
+            }
         }
     }
 
@@ -870,6 +1011,7 @@ public class FrigateEventsBrowserView {
         int missing = columns - rem;
         for (int i = 0; i < missing; i++) {
             View spacer = new View(context);
+            spacer.setTag("spacer");
             LinearLayout.LayoutParams spLp = new LinearLayout.LayoutParams(0, s(1), 1.0f);
             if (i < missing - 1) {
                 spLp.rightMargin = colGap;
@@ -903,7 +1045,7 @@ public class FrigateEventsBrowserView {
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         String thumbUrl = event.getEffectiveThumbnailUrl(repository.getThumbnailUrl(event.getId()));
         if (thumbUrl != null && !thumbUrl.isEmpty()) {
-            imageLoader.load(thumbUrl, thumbView);
+            pendingThumbnails.put(thumbView, thumbUrl);
         }
 
         // 2. Top-left detection badge
@@ -1013,6 +1155,72 @@ public class FrigateEventsBrowserView {
         return card;
     }
 
+    private void checkAndLoadVisibleThumbnails() {
+        if (isDestroyed || eventsScrollView == null || pendingThumbnails.isEmpty()) return;
+        int scrollHeight = eventsScrollView.getHeight();
+        if (scrollHeight <= 0) {
+            eventsScrollView.post(this::checkAndLoadVisibleThumbnails);
+            return;
+        }
+        int scrollY = eventsScrollView.getScrollY();
+        int buffer = Math.round(scrollHeight * 1.5f); // 1.5 screen buffer above and below
+        int minVisibleY = Math.max(0, scrollY - buffer);
+        int maxVisibleY = scrollY + scrollHeight + buffer;
+
+        Rect cardRect = new Rect();
+        Iterator<Map.Entry<ImageView, String>> it = pendingThumbnails.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<ImageView, String> entry = it.next();
+            ImageView iv = entry.getKey();
+            String url = entry.getValue();
+            if (iv == null || iv.getParent() == null) {
+                it.remove();
+                continue;
+            }
+            View card = (View) iv.getParent();
+            if (!isDescendantOf(card, eventsScrollView)) {
+                it.remove();
+                continue;
+            }
+            card.getDrawingRect(cardRect);
+            try {
+                eventsScrollView.offsetDescendantRectToMyCoords(card, cardRect);
+                if (cardRect.bottom >= minVisibleY && cardRect.top <= maxVisibleY) {
+                    imageLoader.load(url, iv);
+                    it.remove();
+                }
+            } catch (Throwable ignored) {}
+        }
+    }
+
+    private void scrollToEpoch(long epochSeconds) {
+        if (isDestroyed || displayedEvents.isEmpty() || eventsScrollView == null) return;
+        FrigateEvent closest = null;
+        double minDiff = Double.MAX_VALUE;
+        for (FrigateEvent ev : displayedEvents) {
+            double start = ev.getStartTime();
+            double end = Math.max(start, ev.getEndTime());
+            double diff;
+            if (epochSeconds >= start && epochSeconds <= end) {
+                diff = 0.0;
+            } else if (epochSeconds < start) {
+                diff = start - epochSeconds;
+            } else {
+                diff = epochSeconds - end;
+            }
+            if (diff < minDiff) {
+                minDiff = diff;
+                closest = ev;
+                if (diff == 0.0) break;
+            }
+        }
+        if (closest != null) {
+            highlightedEventId = closest.getId();
+            updateCardHighlights();
+            scrollToHighlightedCard(closest.getId());
+        }
+    }
+
     private void handleTimelineZoneTap(long tapEpochSeconds, double hitToleranceSeconds) {
         if (displayedEvents.isEmpty()) return;
 
@@ -1084,13 +1292,26 @@ public class FrigateEventsBrowserView {
         View target = cardViewMap.get(eventId);
         if (target == null) return;
         eventsScrollView.post(() -> {
-            if (isDestroyed || eventsScrollView == null) return;
-            Rect rect = new Rect();
-            target.getDrawingRect(rect);
-            eventsScrollView.offsetDescendantRectToMyCoords(target, rect);
-            int targetTop = Math.max(0, rect.top - Math.max(0, (eventsScrollView.getHeight() - rect.height()) / 3));
-            eventsScrollView.smoothScrollTo(0, targetTop);
+            try {
+                if (isDestroyed || eventsScrollView == null) return;
+                if (!isDescendantOf(target, eventsScrollView)) return;
+                Rect rect = new Rect();
+                target.getDrawingRect(rect);
+                eventsScrollView.offsetDescendantRectToMyCoords(target, rect);
+                int targetTop = Math.max(0, rect.top - Math.max(0, (eventsScrollView.getHeight() - rect.height()) / 3));
+                eventsScrollView.smoothScrollTo(0, targetTop);
+            } catch (Throwable ignored) {}
         });
+    }
+
+    private static boolean isDescendantOf(View descendant, View parent) {
+        if (descendant == null || parent == null) return false;
+        ViewParent p = descendant.getParent();
+        while (p != null) {
+            if (p == parent) return true;
+            p = p.getParent();
+        }
+        return false;
     }
 
     // --- Formatting Helpers ---

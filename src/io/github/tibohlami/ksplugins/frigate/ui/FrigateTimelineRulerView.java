@@ -16,6 +16,7 @@ import io.github.tibohlami.ksplugins.frigate.model.ReviewSegment;
 
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
@@ -85,20 +86,68 @@ public class FrigateTimelineRulerView extends View {
 
     private List<RecordingSegment> segments = Collections.emptyList();
     private List<ReviewSegment> reviewSegments = Collections.emptyList();
-    private final List<VisualBand> tmpVisualBands = new ArrayList<>();
+    private VisualBand[] visualBands = new VisualBand[64];
+    private int visualBandCount = 0;
+    private boolean[] rowRecordedBuffer = new boolean[0];
+    private byte[] rowSeverityBuffer = new byte[0];
+    private final Date reusableDate = new Date();
+    private static final String[] BADGE_COUNT_STRINGS = new String[64];
+    static {
+        for (int i = 0; i < BADGE_COUNT_STRINGS.length; i++) {
+            BADGE_COUNT_STRINGS[i] = "\u00d7" + i;
+        }
+    }
     private final Map<Long, HourMotionStats> hourlyStats = new HashMap<>();
     private double globalNoiseFloor = 0.0;
     private double globalMotionSpan = 2500.0;
 
     private static final class VisualBand {
-        final float top;
-        final float bot;
-        final byte sev;
+        float top;
+        float bot;
+        byte sev;
 
         VisualBand(float top, float bot, byte sev) {
             this.top = top;
             this.bot = bot;
             this.sev = sev;
+        }
+    }
+
+    private void addVisualBand(float top, float bot, byte sev) {
+        if (visualBandCount >= visualBands.length) {
+            VisualBand[] newArr = new VisualBand[visualBands.length * 2];
+            System.arraycopy(visualBands, 0, newArr, 0, visualBands.length);
+            visualBands = newArr;
+        }
+        VisualBand b = visualBands[visualBandCount];
+        if (b == null) {
+            b = new VisualBand(top, bot, sev);
+            visualBands[visualBandCount] = b;
+        } else {
+            b.top = top;
+            b.bot = bot;
+            b.sev = sev;
+        }
+        visualBandCount++;
+    }
+
+    private void sortVisualBands(int count) {
+        for (int i = 1; i < count; i++) {
+            VisualBand key = visualBands[i];
+            float keyTop = key.top;
+            int j = i - 1;
+            while (j >= 0 && visualBands[j].top > keyTop) {
+                visualBands[j + 1] = visualBands[j];
+                j--;
+            }
+            visualBands[j + 1] = key;
+        }
+    }
+
+    private void ensureRowBuffers(int h) {
+        if (h > rowRecordedBuffer.length) {
+            rowRecordedBuffer = new boolean[h];
+            rowSeverityBuffer = new byte[h];
         }
     }
 
@@ -266,6 +315,10 @@ public class FrigateTimelineRulerView extends View {
 
     public long getVisibleTopEpoch() {
         return (long) Math.ceil(cursorEpochSec + (visibleWindowSec / 2.0));
+    }
+
+    public double getVisibleWindowSeconds() {
+        return visibleWindowSec;
     }
 
     private void notifyViewportChanged() {
@@ -577,11 +630,18 @@ public class FrigateTimelineRulerView extends View {
     }
 
     @Override
+    protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+        super.onSizeChanged(w, h, oldw, oldh);
+        ensureRowBuffers(h);
+    }
+
+    @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
         int w = getWidth();
         int h = getHeight();
         if (w <= 0 || h <= 0) return;
+        ensureRowBuffers(h);
 
         long now = System.currentTimeMillis() / 1000L;
         if (isLivePinned && !isDragging && now > maxEpochSec) {
@@ -606,8 +666,10 @@ public class FrigateTimelineRulerView extends View {
         if (!segments.isEmpty() || !reviewSegments.isEmpty()) {
             int bucketSec = pickWaveformBucketSec(dp(4.0f) / pxPerSec);
             double snapUnitSec = bucketSec * 2.0; // Frigate-style segmentDuration (2 waveform bars)
-            boolean[] rowRecorded = new boolean[h];
-            byte[] rowSeverity = new byte[h]; // 0 = none, 1 = detection (peach), 2 = alert (rose)
+            boolean[] rowRecorded = rowRecordedBuffer;
+            byte[] rowSeverity = rowSeverityBuffer; // 0 = none, 1 = detection (peach), 2 = alert (rose)
+            Arrays.fill(rowRecorded, 0, h, false);
+            Arrays.fill(rowSeverity, 0, h, (byte) 0);
 
             if (!segments.isEmpty()) {
                 int firstIdx = lowerBound(segments, bottomEpoch - snapUnitSec - 120.0);
@@ -703,6 +765,8 @@ public class FrigateTimelineRulerView extends View {
                 float idleDotHalfW = dp(0.65f);
                 float minActiveBar = dp(1.4f);
                 int segScanIdx = lowerBound(segments, firstBucket - 120.0);
+                long lastHourKey = Long.MIN_VALUE;
+                HourMotionStats lastStats = null;
 
                 for (long tStart = firstBucket; tStart < lastBucket; tStart += bucketSec) {
                     long tEnd = tStart + bucketSec;
@@ -723,7 +787,14 @@ public class FrigateTimelineRulerView extends View {
                     if (motionCount == 0) continue;
                     double midTime = tStart + bucketSec * 0.5;
                     long hourKey = (long) Math.floor(midTime / 3600.0);
-                    HourMotionStats stats = hourlyStats.get(hourKey);
+                    HourMotionStats stats;
+                    if (hourKey == lastHourKey) {
+                        stats = lastStats;
+                    } else {
+                        stats = hourlyStats.get(hourKey);
+                        lastHourKey = hourKey;
+                        lastStats = stats;
+                    }
                     double floor = stats != null ? stats.noiseFloor : globalNoiseFloor;
                     double span = stats != null ? stats.span : globalMotionSpan;
                     float norm = maxSegMotion > floor
@@ -777,8 +848,8 @@ public class FrigateTimelineRulerView extends View {
                 canvas.drawLine(0, y, isMajor ? majorLen : minorLen, y, tickPaint);
             }
             if (isMajor && y > dp(12) && y < h - dp(12)) {
-                Date tickDate = new Date(t * 1000L);
-                String lbl = isMidnight ? dayLabelFmt.format(tickDate) : timeHmFmt.format(tickDate);
+                reusableDate.setTime(t * 1000L);
+                String lbl = isMidnight ? dayLabelFmt.format(reusableDate) : timeHmFmt.format(reusableDate);
                 canvas.drawText(lbl, dp(11), y + textCenterOffset, isMidnight ? dayLabelPaint : labelPaint);
             }
         }
@@ -787,9 +858,10 @@ public class FrigateTimelineRulerView extends View {
         float cy = h / 2f;
         canvas.drawLine(0, cy, w, cy, redLinePaint);
 
+        reusableDate.setTime((long) (cursorEpochSec * 1000L));
         String pillText = (isLivePinned && !eventBrowserMode)
                 ? FrigateI18n.tr(getContext(), config, "common_live")
-                : timeHmsFmt.format(new Date(cursorEpochSec * 1000L));
+                : timeHmsFmt.format(reusableDate);
         float pillW = Math.min(w - dp(4), Math.max(dp(58), redPillTextPaint.measureText(pillText) + dp(12)));
         float pillH = dp(20);
         pillRect.set((w - pillW) / 2f, cy - pillH / 2f, (w + pillW) / 2f, cy + pillH / 2f);
@@ -819,7 +891,7 @@ public class FrigateTimelineRulerView extends View {
         float minBandPx = dp(6);
         float edgeW = dp(3.5f);
 
-        tmpVisualBands.clear();
+        visualBandCount = 0;
         if (!reviewSegments.isEmpty()) {
             int firstRev = lowerBoundReview(reviewSegments, bottomEpoch - snapUnitSec - 300.0);
             for (int i = firstRev; i < reviewSegments.size(); i++) {
@@ -840,7 +912,7 @@ public class FrigateTimelineRulerView extends View {
                 if (bandBot < 0f || bandTop > h) continue;
 
                 byte sev = "alert".equalsIgnoreCase(rev.severity) ? (byte) 2 : (byte) 1;
-                tmpVisualBands.add(new VisualBand(bandTop, bandBot, sev));
+                addVisualBand(bandTop, bandBot, sev);
 
                 int yTop = Math.max(0, (int) Math.floor(bandTop));
                 int yBot = Math.min(h - 1, (int) Math.ceil(bandBot));
@@ -867,17 +939,17 @@ public class FrigateTimelineRulerView extends View {
             }
 
             // Merge overlapping/adjacent bands and draw compact count pills for multi-event clusters
-            if (tmpVisualBands.size() > 1) {
-                Collections.sort(tmpVisualBands, (a, b) -> Float.compare(a.top, b.top));
+            if (visualBandCount > 1) {
+                sortVisualBands(visualBandCount);
                 float mergeGapPx = dp(2.0f);
-                float curTop = tmpVisualBands.get(0).top;
-                float curBot = tmpVisualBands.get(0).bot;
-                byte curSev = tmpVisualBands.get(0).sev;
+                float curTop = visualBands[0].top;
+                float curBot = visualBands[0].bot;
+                byte curSev = visualBands[0].sev;
                 int curCount = 1;
                 float lastBadgeBotY = -1000f;
 
-                for (int i = 1; i < tmpVisualBands.size(); i++) {
-                    VisualBand b = tmpVisualBands.get(i);
+                for (int i = 1; i < visualBandCount; i++) {
+                    VisualBand b = visualBands[i];
                     if (b.top <= curBot + mergeGapPx) {
                         curBot = Math.max(curBot, b.bot);
                         if (b.sev > curSev) curSev = b.sev;
@@ -934,7 +1006,9 @@ public class FrigateTimelineRulerView extends View {
             return lastBadgeBotY;
         }
 
-        String label = "\u00d7" + count;
+        String label = (count >= 0 && count < BADGE_COUNT_STRINGS.length)
+                ? BADGE_COUNT_STRINGS[count]
+                : ("\u00d7" + count);
         float textW = clusterBadgeTextPaint.measureText(label);
         float badgeW = Math.max(dp(18), textW + dp(7));
         float right = w - edgeW - dp(3);
