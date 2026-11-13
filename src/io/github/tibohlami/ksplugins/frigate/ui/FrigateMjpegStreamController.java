@@ -71,8 +71,8 @@ public class FrigateMjpegStreamController {
             new Thread(() -> {
                 try {
                     conn.disconnect();
-                } catch (Exception ignored) {}
-            }).start();
+                } catch (Throwable ignored) {}
+            }, "FrigateLiveMJPEG-Disconnect").start();
         }
         Thread t = mjpegThread;
         mjpegThread = null;
@@ -173,7 +173,7 @@ public class FrigateMjpegStreamController {
                 if (conn != null) {
                     try {
                         conn.disconnect();
-                    } catch (Exception ignored) {}
+                    } catch (Throwable ignored) {}
                 }
                 if (activeMjpegConn == conn) {
                     activeMjpegConn = null;

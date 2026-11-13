@@ -170,8 +170,10 @@ public class AsyncImageLoader {
                 conn.setRequestProperty("Cache-Control", "no-cache");
             }
 
-            String activeToken = (configProvider != null) ? configProvider.getAuthToken() : authToken;
-            FrigateHttpHelper.applyAuthHeaders(conn, activeToken);
+            if (FrigateHttpHelper.isConfiguredFrigateHost(url, configProvider)) {
+                String activeToken = (configProvider != null) ? configProvider.getAuthToken() : authToken;
+                FrigateHttpHelper.applyAuthHeaders(conn, activeToken);
+            }
 
             if (conn.getResponseCode() == 200) {
                 byte[] data;

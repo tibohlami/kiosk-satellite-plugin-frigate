@@ -8,7 +8,7 @@ import static org.junit.Assert.*;
 public class FrigateEventTest {
 
     @Test
-    public void testParseStandardFrigateEvent() {
+    public void testParseStandardFrigateEvent() throws Exception {
         String jsonStr = "{\n" +
                 "  \"id\": \"1710500123.456-abcdef\",\n" +
                 "  \"camera\": \"camera_parking_avant\",\n" +
@@ -38,7 +38,7 @@ public class FrigateEventTest {
     }
 
     @Test
-    public void testParseFrigateReviewEvent() {
+    public void testParseFrigateReviewEvent() throws Exception {
         String jsonStr = "{\n" +
                 "  \"id\": \"review-12345\",\n" +
                 "  \"camera\": \"cam_parking\",\n" +
