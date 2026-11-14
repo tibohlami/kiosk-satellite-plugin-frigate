@@ -707,9 +707,8 @@ public class FrigateTimelineRulerView extends View {
         // 1. Base background
         canvas.drawRect(0, 0, w, h, bgPaint);
 
-        float waveformCenterX = w * 0.68f;
-        float maxBarHalfWidth = w * 0.27f;
-        float labelRightX = w * 0.36f;
+        float waveformCenterX = w * 0.5f;
+        float maxBarHalfWidth = (w - dp(6)) * 0.46f;
 
         // 2. Recorded segments, object severity highlights (alert/detection), & activity waveform
         if (!segments.isEmpty() || !reviewSegments.isEmpty()) {
@@ -774,9 +773,9 @@ public class FrigateTimelineRulerView extends View {
                 }
             }
 
-            // Draw recorded background strip
-            float bandLeft = w * 0.38f;
-            float bandRight = w - dp(2);
+            // Draw recorded background strip covering full timeline width
+            float bandLeft = 0;
+            float bandRight = w;
             int y = 0;
             while (y < h) {
                 if (!rowRecorded[y]) {
