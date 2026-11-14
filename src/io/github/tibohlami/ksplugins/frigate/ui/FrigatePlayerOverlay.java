@@ -47,7 +47,7 @@ import java.util.Set;
 public class FrigatePlayerOverlay {
 
     private final Context context;
-    private final KsTheme theme;
+    private KsTheme theme;
     private final me.jxl.kiosk.plugins.PluginHost host;
     private final FrigateApiClient apiClient;
     private final FrigateConfig config;
@@ -55,6 +55,7 @@ public class FrigatePlayerOverlay {
     private final Runnable onClose;
 
     private FrameLayout videoContainerRef;
+    private FrameLayout rulerWrapper;
     private FrigateTimelineRulerView timelineRuler;
     private ImageView scrubPreviewView;
     private TextView scrubHudPill;
@@ -74,6 +75,11 @@ public class FrigatePlayerOverlay {
     private TextView liveBadge;
     private TextView transportModeBadge;
     private TextView liveFpsBadge;
+    private String lastTransportLabel;
+    private String lastTransportTextHex;
+    private String lastTransportBgHex;
+    private String lastTransportStrokeHex;
+    private int lastLiveFps = -1;
     private int lastExoFrames = -1;
     private long lastExoFpsTsMs = 0L;
     private LinearLayout headerObjectsContainer;
@@ -92,6 +98,11 @@ public class FrigatePlayerOverlay {
     private final Runnable hideOverlayControlsRunnable = () -> hideVideoOverlayControls(true);
     private FrigateObjectBoxesOverlayView objectBoxesOverlay;
     private boolean showObjectBoxes = false;
+    private LinearLayout modalCard;
+    private TextView camBadge;
+    private TextView playerCloseBtn;
+    private ImageView zoomOutBtn;
+    private ImageView zoomInBtn;
     private int activeVideoWidth = 0;
     private int activeVideoHeight = 0;
     private float activeVideoPixelAspect = 1.0f;
@@ -708,7 +719,7 @@ public class FrigatePlayerOverlay {
      * Scales DP values according to user-configured uiScale.
      */
     private int s(float dp) {
-        float scale = (config != null) ? config.getUiScale() : 1.35f;
+        float scale = (config != null) ? config.getUiScale() : 1.0f;
         return Math.max(1, Math.round(theme.px(Math.round(dp * scale))));
     }
 
@@ -716,7 +727,7 @@ public class FrigatePlayerOverlay {
      * Scales SP font sizes according to user-configured uiScale.
      */
     private float sp(float sp) {
-        float scale = (config != null) ? config.getUiScale() : 1.35f;
+        float scale = (config != null) ? config.getUiScale() : 1.0f;
         return sp * scale;
     }
 
@@ -729,11 +740,12 @@ public class FrigatePlayerOverlay {
 
         // Centered modern modal card
         LinearLayout card = new LinearLayout(context);
+        this.modalCard = card;
         card.setOrientation(LinearLayout.VERTICAL);
         GradientDrawable cardBg = new GradientDrawable();
-        cardBg.setColor(Color.parseColor("#0F131D"));
-        cardBg.setCornerRadius(s(16));
-        cardBg.setStroke(s(1), Color.parseColor("#1E273A"));
+        cardBg.setColor(FrigateTheme.surfaceContainer(theme));
+        cardBg.setCornerRadius(s(FrigateTheme.radiusCard(theme)));
+        cardBg.setStroke(s(1), FrigateTheme.outlineVariant(theme));
         card.setBackground(cardBg);
 
         int pad = s(16);
@@ -786,6 +798,107 @@ public class FrigatePlayerOverlay {
         return root;
     }
 
+    public void onThemeChanged(KsTheme newTheme) {
+        if (newTheme == null) return;
+        this.theme = newTheme;
+        if (modalCard != null) {
+            GradientDrawable cardBg = new GradientDrawable();
+            cardBg.setColor(FrigateTheme.surfaceContainer(theme));
+            cardBg.setCornerRadius(s(FrigateTheme.radiusCard(theme)));
+            cardBg.setStroke(s(1), FrigateTheme.outlineVariant(theme));
+            modalCard.setBackground(cardBg);
+        }
+        if (camBadge != null) {
+            MaterialIcons.setIconOnTextView(camBadge, MaterialIcons.CAMERA, FrigateTheme.onSurface(theme), s(18), s(8), theme);
+            GradientDrawable cbBg = new GradientDrawable();
+            cbBg.setColor(FrigateTheme.surfaceContainerHigh(theme));
+            cbBg.setCornerRadius(s(FrigateTheme.radiusControl(theme)));
+            cbBg.setStroke(s(1), FrigateTheme.outlineVariant(theme));
+            camBadge.setBackground(cbBg);
+            camBadge.setTextColor(FrigateTheme.onSurface(theme));
+            camBadge.setTypeface(FrigateTheme.typeface(theme, 600));
+        }
+        if (headerTimeView != null) {
+            headerTimeView.setTextColor(FrigateTheme.onSurfaceVariant(theme));
+            headerTimeView.setTypeface(FrigateTheme.typeface(theme, 500));
+            MaterialIcons.setIconOnTextView(headerTimeView, MaterialIcons.CALENDAR, FrigateTheme.onSurfaceVariant(theme), s(18), s(8), theme);
+        }
+        if (playerCloseBtn != null) {
+            int closeErr = FrigateTheme.error(theme);
+            MaterialIcons.setIconOnTextView(playerCloseBtn, MaterialIcons.CLOSE, closeErr, s(16), s(6), theme);
+            int errBgNormal = Color.argb(35, Color.red(closeErr), Color.green(closeErr), Color.blue(closeErr));
+            int errBgPressed = Color.argb(85, Color.red(closeErr), Color.green(closeErr), Color.blue(closeErr));
+            int errStrokeNormal = Color.argb(95, Color.red(closeErr), Color.green(closeErr), Color.blue(closeErr));
+            FrigateUiUtils.applyCloseButtonFeedback(
+                    playerCloseBtn,
+                    errBgNormal,
+                    errBgPressed,
+                    errStrokeNormal,
+                    closeErr,
+                    s(FrigateTheme.radiusControl(theme)),
+                    s(1)
+            );
+            playerCloseBtn.setTextColor(closeErr);
+            playerCloseBtn.setTypeface(FrigateTheme.typeface(theme, 600));
+        }
+        if (zoomOutBtn != null) {
+            updateZoomButtonStyle(zoomOutBtn, MaterialIcons.ZOOM_OUT);
+        }
+        if (zoomInBtn != null) {
+            updateZoomButtonStyle(zoomInBtn, MaterialIcons.ZOOM_IN);
+        }
+        if (objectDetectorController != null) {
+            objectDetectorController.onThemeChanged(newTheme);
+        }
+        if (timelineRuler != null) {
+            timelineRuler.setTheme(newTheme);
+        }
+        if (rulerWrapper != null) {
+            updateRulerWrapperTheme();
+        }
+        updateVideoContainerTheme();
+        if (timeCurrentText != null) {
+            timeCurrentText.setTextColor(FrigateTheme.onSurface(theme));
+        }
+        if (timeDurationText != null) {
+            timeDurationText.setTextColor(FrigateTheme.onSurfaceVariant(theme));
+        }
+        if (seekBar != null) {
+            theme.styleSlider(seekBar);
+        }
+        updateMuteButtonStyle();
+        updateLoopButtonStyle();
+        updateBboxButtonStyle();
+        if (lastTransportLabel != null) {
+            updateTransportModeBadge(lastTransportLabel, lastTransportTextHex, lastTransportBgHex, lastTransportStrokeHex);
+        }
+        if (lastLiveFps >= 0) {
+            updateLiveFpsBadge(lastLiveFps);
+        }
+    }
+
+    private void updateVideoContainerTheme() {
+        if (videoContainerRef == null) return;
+        boolean isDark = FrigateTheme.isDark(theme);
+        GradientDrawable frameBg = new GradientDrawable();
+        int frameBgColor = isDark
+                ? Color.parseColor("#000000")
+                : FrigateTheme.surfaceContainer(theme);
+        frameBg.setColor(frameBgColor);
+        frameBg.setCornerRadius(s(12));
+        videoContainerRef.setBackground(frameBg);
+    }
+
+    private void updateRulerWrapperTheme() {
+        if (rulerWrapper == null) return;
+        boolean isDark = FrigateTheme.isDark(theme);
+        GradientDrawable rBg = new GradientDrawable();
+        rBg.setColor(isDark ? Color.parseColor("#0B101A") : Color.parseColor("#EDF0F3"));
+        rBg.setCornerRadius(s(12));
+        rBg.setStroke(s(1), FrigateTheme.outlineVariant(theme));
+        rulerWrapper.setBackground(rBg);
+    }
+
     private String tr(String key, Object... args) {
         return FrigateI18n.tr(context, config, key, args);
     }
@@ -797,36 +910,41 @@ public class FrigatePlayerOverlay {
         header.setPadding(0, 0, 0, s(14));
 
         // Camera Name Badge with Material Camera icon
-        TextView camBadge = new TextView(context);
+        camBadge = new TextView(context);
         String camName = (currentCamera != null && !currentCamera.isEmpty())
                 ? currentCamera.substring(0, 1).toUpperCase(Locale.ROOT) + currentCamera.substring(1)
                 : tr("common_camera_fallback");
         camBadge.setText(camName);
-        MaterialIcons.setIconOnTextView(camBadge, MaterialIcons.CAMERA, Color.WHITE, s(18), s(8), theme);
+        MaterialIcons.setIconOnTextView(camBadge, MaterialIcons.CAMERA, FrigateTheme.onSurface(theme), s(18), s(8), theme);
         GradientDrawable cbBg = new GradientDrawable();
-        cbBg.setColor(Color.parseColor("#1E273A"));
-        cbBg.setCornerRadius(s(10));
-        cbBg.setStroke(s(1), Color.parseColor("#334155"));
+        cbBg.setColor(FrigateTheme.surfaceContainerHigh(theme));
+        cbBg.setCornerRadius(s(FrigateTheme.radiusControl(theme)));
+        cbBg.setStroke(s(1), FrigateTheme.outlineVariant(theme));
         camBadge.setBackground(cbBg);
         camBadge.setPadding(s(14), s(8), s(14), s(8));
         camBadge.setTextSize(sp(15));
-        camBadge.setTextColor(Color.WHITE);
-        camBadge.setTypeface(null, android.graphics.Typeface.BOLD);
+        camBadge.setTextColor(FrigateTheme.onSurface(theme));
+        camBadge.setTypeface(FrigateTheme.typeface(theme, 600));
+        camBadge.setIncludeFontPadding(false);
+        camBadge.setGravity(Gravity.CENTER_VERTICAL);
         header.addView(camBadge);
 
-        // Bright LIVE indicator pill (visible in real-time stream mode)
+        // Bright LIVE indicator pill in RED (visible in real-time stream mode)
         liveBadge = new TextView(context);
         liveBadge.setText(tr("common_live"));
-        MaterialIcons.setIconOnTextView(liveBadge, MaterialIcons.LIVE, Color.parseColor("#EF4444"), s(14), s(6), theme);
+        int liveErr = Color.parseColor("#EF4444");
+        MaterialIcons.setIconOnTextView(liveBadge, MaterialIcons.LIVE, liveErr, s(14), s(6), theme);
         GradientDrawable lbBg = new GradientDrawable();
-        lbBg.setColor(Color.parseColor("#2A1215"));
-        lbBg.setCornerRadius(s(10));
-        lbBg.setStroke(s(1), Color.parseColor("#EF4444"));
+        lbBg.setColor(Color.argb(35, Color.red(liveErr), Color.green(liveErr), Color.blue(liveErr)));
+        lbBg.setCornerRadius(s(FrigateTheme.radiusControl(theme)));
+        lbBg.setStroke(s(1), liveErr);
         liveBadge.setBackground(lbBg);
         liveBadge.setPadding(s(12), s(8), s(12), s(8));
         liveBadge.setTextSize(sp(13));
-        liveBadge.setTextColor(Color.parseColor("#FCA5A5"));
-        liveBadge.setTypeface(null, android.graphics.Typeface.BOLD);
+        liveBadge.setTextColor(liveErr);
+        liveBadge.setTypeface(FrigateTheme.typeface(theme, 600));
+        liveBadge.setIncludeFontPadding(false);
+        liveBadge.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout.LayoutParams lbLp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         lbLp.leftMargin = s(10);
@@ -836,21 +954,30 @@ public class FrigatePlayerOverlay {
         // Optional transport mode badge (HLS / MP4 / MSE / MJPEG)
         transportModeBadge = new TextView(context);
         transportModeBadge.setTextSize(sp(11));
-        transportModeBadge.setTypeface(null, android.graphics.Typeface.BOLD);
+        transportModeBadge.setTypeface(FrigateTheme.typeface(theme, 600));
+        transportModeBadge.setSingleLine(true);
+        transportModeBadge.setIncludeFontPadding(false);
+        transportModeBadge.setGravity(Gravity.CENTER);
         transportModeBadge.setPadding(s(10), s(6), s(10), s(6));
         LinearLayout.LayoutParams tmLp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        tmLp.gravity = Gravity.CENTER_VERTICAL;
         tmLp.leftMargin = s(8);
         transportModeBadge.setVisibility(View.GONE);
         header.addView(transportModeBadge, tmLp);
 
-        // Live FPS badge (MSE / MJPEG)
+        // Live FPS badge (MSE / MJPEG) - Fixed width for up to 2 digits to prevent jitter
         liveFpsBadge = new TextView(context);
         liveFpsBadge.setTextSize(sp(11));
-        liveFpsBadge.setTypeface(null, android.graphics.Typeface.BOLD);
-        liveFpsBadge.setPadding(s(10), s(6), s(10), s(6));
+        liveFpsBadge.setTypeface(FrigateTheme.typeface(theme, 600));
+        liveFpsBadge.setSingleLine(true);
+        liveFpsBadge.setIncludeFontPadding(false);
+        liveFpsBadge.setGravity(Gravity.CENTER);
+        liveFpsBadge.setPadding(0, s(6), 0, s(6));
+        int fpsPillWidth = s(60);
         LinearLayout.LayoutParams fpsLp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                fpsPillWidth, LinearLayout.LayoutParams.WRAP_CONTENT);
+        fpsLp.gravity = Gravity.CENTER_VERTICAL;
         fpsLp.leftMargin = s(6);
         liveFpsBadge.setVisibility(View.GONE);
         header.addView(liveFpsBadge, fpsLp);
@@ -875,36 +1002,42 @@ public class FrigatePlayerOverlay {
                 : ((event != null && !event.getFormattedDateTime(context, config).isEmpty()) ? event.getFormattedDateTime(context, config) : getFormattedEventTime());
         headerTimeView.setText(formattedTime);
         headerTimeView.setTextSize(sp(14));
-        headerTimeView.setTextColor(Color.parseColor("#94A3B8"));
-        MaterialIcons.setIconOnTextView(headerTimeView, MaterialIcons.CALENDAR, Color.parseColor("#94A3B8"), s(18), s(8), theme);
+        headerTimeView.setTextColor(FrigateTheme.onSurfaceVariant(theme));
+        headerTimeView.setTypeface(FrigateTheme.typeface(theme, 500));
+        MaterialIcons.setIconOnTextView(headerTimeView, MaterialIcons.CALENDAR, FrigateTheme.onSurfaceVariant(theme), s(18), s(8), theme);
         LinearLayout.LayoutParams timeLp = new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f);
         timeLp.leftMargin = s(14);
         header.addView(headerTimeView, timeLp);
 
         // Close Button with Material Close icon
-        TextView closeBtn = new TextView(context);
-        closeBtn.setText(tr("common_close"));
-        MaterialIcons.setIconOnTextView(closeBtn, MaterialIcons.CLOSE, Color.parseColor("#EF4444"), s(16), s(6), theme);
+        playerCloseBtn = new TextView(context);
+        playerCloseBtn.setText(tr("common_close"));
+        int closeErr = FrigateTheme.error(theme);
+        MaterialIcons.setIconOnTextView(playerCloseBtn, MaterialIcons.CLOSE, closeErr, s(16), s(6), theme);
+        int errBgNormal = Color.argb(35, Color.red(closeErr), Color.green(closeErr), Color.blue(closeErr));
+        int errBgPressed = Color.argb(85, Color.red(closeErr), Color.green(closeErr), Color.blue(closeErr));
+        int errStrokeNormal = Color.argb(95, Color.red(closeErr), Color.green(closeErr), Color.blue(closeErr));
+
         FrigateUiUtils.applyCloseButtonFeedback(
-                closeBtn,
-                Color.parseColor("#261418"),
-                Color.parseColor("#7F1D1D"),
-                Color.parseColor("#EF4444"),
-                Color.parseColor("#FCA5A5"),
-                s(10),
+                playerCloseBtn,
+                errBgNormal,
+                errBgPressed,
+                errStrokeNormal,
+                closeErr,
+                s(FrigateTheme.radiusControl(theme)),
                 s(1)
         );
-        closeBtn.setPadding(s(16), s(8), s(16), s(8));
-        closeBtn.setTextSize(sp(14));
-        closeBtn.setTextColor(Color.parseColor("#EF4444"));
-        closeBtn.setTypeface(null, android.graphics.Typeface.BOLD);
-        closeBtn.setOnClickListener(v -> {
+        playerCloseBtn.setPadding(s(16), s(8), s(16), s(8));
+        playerCloseBtn.setTextSize(sp(14));
+        playerCloseBtn.setTextColor(closeErr);
+        playerCloseBtn.setTypeface(FrigateTheme.typeface(theme, 600));
+        playerCloseBtn.setOnClickListener(v -> {
             if (isClosed) return;
             FrigateUiUtils.markButtonClosing(v);
             closePlayer();
         });
-        header.addView(closeBtn);
+        header.addView(playerCloseBtn);
 
         return header;
     }
@@ -947,10 +1080,7 @@ public class FrigatePlayerOverlay {
         };
         videoContainer.setClickable(true);
         this.videoContainerRef = videoContainer;
-        GradientDrawable frameBg = new GradientDrawable();
-        frameBg.setColor(Color.BLACK);
-        frameBg.setCornerRadius(s(12));
-        videoContainer.setBackground(frameBg);
+        updateVideoContainerTheme();
         videoContainer.setClipToOutline(true);
 
         // 0. Native Media3 ExoPlayer TextureView (primary hardware HLS VOD playback)
@@ -992,7 +1122,7 @@ public class FrigatePlayerOverlay {
         // 4b. Real-time low-res snapshot preview displayed while scrubbing vertical timeline
         scrubPreviewView = new ImageView(context);
         scrubPreviewView.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        scrubPreviewView.setBackgroundColor(Color.BLACK);
+        scrubPreviewView.setBackgroundColor(Color.TRANSPARENT);
         scrubPreviewView.setVisibility(View.GONE);
         videoContainer.addView(scrubPreviewView, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
@@ -1000,7 +1130,7 @@ public class FrigatePlayerOverlay {
         // 4c. Historical object bounding boxes overlay (interpolated along trajectory)
         objectBoxesOverlay = new FrigateObjectBoxesOverlayView(context);
         objectBoxesOverlay.setConfig(config);
-        objectBoxesOverlay.setUiScale(config != null ? config.getUiScale() : 1.35f);
+        objectBoxesOverlay.setUiScale(config != null ? config.getUiScale() : 1.0f);
         objectBoxesOverlay.setVisibility((!isLiveStreamMode && showObjectBoxes) ? View.VISIBLE : View.GONE);
         videoContainer.addView(objectBoxesOverlay, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
@@ -1165,7 +1295,7 @@ public class FrigatePlayerOverlay {
         timeCurrentText = new TextView(context);
         timeCurrentText.setText(isLiveStreamMode ? tr("common_live") : "00:00");
         timeCurrentText.setTextSize(sp(14));
-        timeCurrentText.setTextColor(Color.parseColor("#F1F5F9"));
+        timeCurrentText.setTextColor(FrigateTheme.onSurface(theme));
         timeCurrentText.setTypeface(null, android.graphics.Typeface.BOLD);
         int padH = s(12);
         timeCurrentText.setPadding(0, 0, padH, 0);
@@ -1231,7 +1361,7 @@ public class FrigatePlayerOverlay {
         timeDurationText = new TextView(context);
         timeDurationText.setText(isLiveStreamMode ? tr("common_live") : (initialDurationMs > 0 ? formatDuration(initialDurationMs) : "00:00"));
         timeDurationText.setTextSize(sp(14));
-        timeDurationText.setTextColor(Color.parseColor("#94A3B8"));
+        timeDurationText.setTextColor(FrigateTheme.onSurfaceVariant(theme));
         timeDurationText.setPadding(padH, 0, padH, 0);
         transport.addView(timeDurationText);
 
@@ -1308,35 +1438,114 @@ public class FrigatePlayerOverlay {
         if ("PREVIEW".equals(label)) {
             hideLiveFpsBadge();
         }
+        this.lastTransportLabel = label;
+        this.lastTransportTextHex = textHex;
+        this.lastTransportBgHex = bgHex;
+        this.lastTransportStrokeHex = strokeHex;
+
         if (transportModeBadge == null) return;
         if (config != null && !config.isShowStreamModePill()) {
             transportModeBadge.setVisibility(View.GONE);
             return;
         }
+
+        boolean dark = FrigateTheme.isDark(theme);
+        int textColor;
+        int bgColor;
+        int strokeColor;
+
+        if (dark) {
+            textColor = Color.parseColor(textHex);
+            bgColor = Color.parseColor(bgHex);
+            strokeColor = Color.parseColor(strokeHex);
+        } else {
+            textColor = getLightBadgeTextColor(strokeHex, textHex);
+            bgColor = getLightBadgeBgColor(strokeHex);
+            strokeColor = getLightBadgeStrokeColor(strokeHex);
+        }
+
         GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Color.parseColor(bgHex));
-        bg.setCornerRadius(s(8));
-        bg.setStroke(s(1), Color.parseColor(strokeHex));
+        bg.setColor(bgColor);
+        bg.setCornerRadius(s(FrigateTheme.radiusControl(theme)));
+        bg.setStroke(s(1), strokeColor);
         transportModeBadge.setBackground(bg);
         transportModeBadge.setText(label);
-        transportModeBadge.setTextColor(Color.parseColor(textHex));
+        transportModeBadge.setTextColor(textColor);
         transportModeBadge.setVisibility(View.VISIBLE);
     }
 
+    private int getLightBadgeTextColor(String strokeHex, String fallbackTextHex) {
+        if (strokeHex == null) return Color.parseColor(fallbackTextHex);
+        switch (strokeHex.toUpperCase(Locale.US)) {
+            case "#10B981": // Emerald (MSE)
+                return Color.parseColor("#047857");
+            case "#0284C7": // Sky (HLS / EXO)
+                return Color.parseColor("#0369A1");
+            case "#F59E0B": // Amber (MJPEG / MP4)
+                return Color.parseColor("#B45309");
+            case "#7C3AED": // Purple (EXO SW)
+                return Color.parseColor("#6D28D9");
+            case "#334155": // Slate (Neutral / Preview)
+            default:
+                return Color.parseColor("#475569");
+        }
+    }
+
+    private int getLightBadgeBgColor(String strokeHex) {
+        if (strokeHex == null) return Color.parseColor("#F1F5F9");
+        switch (strokeHex.toUpperCase(Locale.US)) {
+            case "#10B981":
+                return Color.parseColor("#ECFDF5");
+            case "#0284C7":
+                return Color.parseColor("#F0F9FF");
+            case "#F59E0B":
+                return Color.parseColor("#FFFBEB");
+            case "#7C3AED":
+                return Color.parseColor("#F5F3FF");
+            case "#334155":
+            default:
+                return Color.parseColor("#F1F5F9");
+        }
+    }
+
+    private int getLightBadgeStrokeColor(String strokeHex) {
+        if (strokeHex == null) return Color.parseColor("#CBD5E1");
+        switch (strokeHex.toUpperCase(Locale.US)) {
+            case "#10B981":
+                return Color.parseColor("#A7F3D0");
+            case "#0284C7":
+                return Color.parseColor("#BAE6FD");
+            case "#F59E0B":
+                return Color.parseColor("#FDE68A");
+            case "#7C3AED":
+                return Color.parseColor("#DDD6FE");
+            case "#334155":
+            default:
+                return Color.parseColor("#CBD5E1");
+        }
+    }
+
     private void updateLiveFpsBadge(int fps) {
+        this.lastLiveFps = fps;
         if (liveFpsBadge == null) return;
         boolean active = isLiveStreamMode ? !isLivePaused : (isPlaying && (isExoPlayback || isHlsPlayback));
         if (!active || fps < 0) {
             liveFpsBadge.setVisibility(View.GONE);
             return;
         }
+
+        boolean dark = FrigateTheme.isDark(theme);
+        int textColor = dark ? Color.parseColor("#93C5FD") : Color.parseColor("#1D4ED8");
+        int bgColor = dark ? Color.parseColor("#0F1E33") : Color.parseColor("#EFF6FF");
+        int strokeColor = dark ? Color.parseColor("#3B82F6") : Color.parseColor("#BFDBFE");
+
         GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Color.parseColor("#0F1E33"));
-        bg.setCornerRadius(s(8));
-        bg.setStroke(s(1), Color.parseColor("#3B82F6"));
+        bg.setColor(bgColor);
+        bg.setCornerRadius(s(FrigateTheme.radiusControl(theme)));
+        bg.setStroke(s(1), strokeColor);
         liveFpsBadge.setBackground(bg);
         liveFpsBadge.setText(fps + " FPS");
-        liveFpsBadge.setTextColor(Color.parseColor("#93C5FD"));
+        liveFpsBadge.setTextColor(textColor);
         liveFpsBadge.setVisibility(View.VISIBLE);
     }
 
@@ -1431,14 +1640,15 @@ public class FrigatePlayerOverlay {
             muteBtn.setTypeface(null, android.graphics.Typeface.BOLD);
             iconColor = Color.WHITE;
         } else {
-            mBg.setColor(Color.parseColor("#1A2234"));
+            mBg.setColor(FrigateTheme.surfaceContainerHigh(theme));
             mBg.setCornerRadius(s(12));
-            mBg.setStroke(s(1), Color.parseColor("#2D3B54"));
+            mBg.setStroke(s(1), FrigateTheme.outlineVariant(theme));
             muteBtn.setBackground(mBg);
             muteBtn.setText(tr("player_sound_muted"));
-            muteBtn.setTextColor(Color.parseColor("#94A3B8"));
+            int inactiveText = FrigateTheme.onSurfaceVariant(theme);
+            muteBtn.setTextColor(inactiveText);
             muteBtn.setTypeface(null, android.graphics.Typeface.NORMAL);
-            iconColor = Color.parseColor("#94A3B8");
+            iconColor = inactiveText;
         }
         MaterialIcons.setIconOnTextView(muteBtn, isMuted ? MaterialIcons.VOLUME_OFF : MaterialIcons.VOLUME_UP,
                 iconColor, s(18), s(6), theme);
@@ -1456,13 +1666,14 @@ public class FrigatePlayerOverlay {
             btn.setTypeface(null, android.graphics.Typeface.BOLD);
             iconColor = Color.WHITE;
         } else {
-            bg.setColor(Color.parseColor("#1A2234"));
+            bg.setColor(FrigateTheme.surfaceContainerHigh(theme));
             bg.setCornerRadius(s(12));
-            bg.setStroke(s(1), Color.parseColor("#2D3B54"));
+            bg.setStroke(s(1), FrigateTheme.outlineVariant(theme));
             btn.setBackground(bg);
-            btn.setTextColor(Color.parseColor("#64748B"));
+            int inactiveText = FrigateTheme.onSurfaceVariant(theme);
+            btn.setTextColor(inactiveText);
             btn.setTypeface(null, android.graphics.Typeface.NORMAL);
-            iconColor = Color.parseColor("#64748B");
+            iconColor = inactiveText;
         }
         MaterialIcons.setIconOnTextView(btn, iconName, iconColor, s(18), s(6), theme);
     }
@@ -1545,16 +1756,12 @@ public class FrigatePlayerOverlay {
         LinearLayout panel = new LinearLayout(context);
         panel.setOrientation(LinearLayout.VERTICAL);
 
-        FrameLayout rulerWrapper = new FrameLayout(context);
-        GradientDrawable rBg = new GradientDrawable();
-        rBg.setColor(Color.parseColor("#0B101A"));
-        rBg.setCornerRadius(s(12));
-        rBg.setStroke(s(1), Color.parseColor("#1E273A"));
-        rulerWrapper.setBackground(rBg);
+        rulerWrapper = new FrameLayout(context);
+        updateRulerWrapperTheme();
         rulerWrapper.setClipToOutline(true);
 
-        float scale = (config != null) ? config.getUiScale() : 1.35f;
-        timelineRuler = new FrigateTimelineRulerView(context, scale);
+        float scale = (config != null) ? config.getUiScale() : 1.0f;
+        timelineRuler = new FrigateTimelineRulerView(context, scale, theme);
         timelineRuler.setConfig(config);
         long now = System.currentTimeMillis() / 1000L;
         timelineRuler.setTimeRange(0L, now);
@@ -1597,11 +1804,11 @@ public class FrigatePlayerOverlay {
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         zrLp.topMargin = s(6);
 
-        ImageView zoomOutBtn = buildZoomButton(MaterialIcons.ZOOM_OUT, tr("browser_zoom_out_desc"));
+        zoomOutBtn = buildZoomButton(MaterialIcons.ZOOM_OUT, tr("browser_zoom_out_desc"));
         zoomOutBtn.setOnClickListener(v -> {
             if (timelineRuler != null) timelineRuler.zoomOut();
         });
-        ImageView zoomInBtn = buildZoomButton(MaterialIcons.ZOOM_IN, tr("browser_zoom_in_desc"));
+        zoomInBtn = buildZoomButton(MaterialIcons.ZOOM_IN, tr("browser_zoom_in_desc"));
         zoomInBtn.setOnClickListener(v -> {
             if (timelineRuler != null) timelineRuler.zoomIn();
         });
@@ -1617,16 +1824,26 @@ public class FrigatePlayerOverlay {
 
     private ImageView buildZoomButton(String iconName, String description) {
         int iconSize = s(18);
-        ImageView btn = MaterialIcons.createIconView(context, iconName, Color.parseColor("#E2E8F0"), iconSize, theme);
+        ImageView btn = MaterialIcons.createIconView(context, iconName, FrigateTheme.onSurface(theme), iconSize, theme);
         btn.setContentDescription(description);
         int pad = s(6);
         btn.setPadding(pad, pad, pad, pad);
         GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Color.parseColor("#161D2B"));
+        bg.setColor(FrigateTheme.surfaceContainerHigh(theme));
         bg.setCornerRadius(s(8));
-        bg.setStroke(s(1), Color.parseColor("#2A374F"));
+        bg.setStroke(s(1), FrigateTheme.outlineVariant(theme));
         btn.setBackground(bg);
         return btn;
+    }
+
+    private void updateZoomButtonStyle(ImageView btn, String iconName) {
+        if (btn == null) return;
+        btn.setImageDrawable(MaterialIcons.getDrawable(iconName, FrigateTheme.onSurface(theme), s(18), theme));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(FrigateTheme.surfaceContainerHigh(theme));
+        bg.setCornerRadius(s(8));
+        bg.setStroke(s(1), FrigateTheme.outlineVariant(theme));
+        btn.setBackground(bg);
     }
 
     private void onRulerScrubStart(long epochSeconds) {
@@ -2512,6 +2729,10 @@ public class FrigatePlayerOverlay {
         // Release view and playback resources without notifying host that overlay should close,
         // allowing Kiosk Satellite to cleanly rebuild the overlay view if needed.
         releasePlayerResources();
+    }
+
+    public boolean isDestroyed() {
+        return isClosed;
     }
 
     private String getFormattedEventTime() {

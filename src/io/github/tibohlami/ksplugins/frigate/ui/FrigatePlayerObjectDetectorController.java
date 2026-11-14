@@ -6,6 +6,7 @@ import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Handler;
 import android.os.Looper;
+import android.view.Gravity;
 import android.view.View;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -49,7 +50,7 @@ public class FrigatePlayerObjectDetectorController {
     }
 
     private final Context context;
-    private final KsTheme theme;
+    private KsTheme theme;
     private final FrigateApiClient apiClient;
     private final FrigateConfig config;
     private final Handler mainHandler;
@@ -61,6 +62,7 @@ public class FrigatePlayerObjectDetectorController {
     private boolean liveObjectPollerRunning = false;
     private volatile boolean liveObjectPollInFlight = false;
     private String lastObjectBadgesKey = "";
+    private Map<String, Double> lastActiveLabels = Collections.emptyMap();
 
     public FrigatePlayerObjectDetectorController(Context context,
                                                  KsTheme theme,
@@ -76,14 +78,24 @@ public class FrigatePlayerObjectDetectorController {
         this.bridge = bridge;
     }
 
+    public void onThemeChanged(KsTheme theme) {
+        if (theme != null) {
+            this.theme = theme;
+            lastObjectBadgesKey = "";
+            if (lastActiveLabels != null && !lastActiveLabels.isEmpty()) {
+                renderObjectBadges(lastActiveLabels);
+            }
+        }
+    }
+
     private int s(float dp) {
-        float scale = (config != null) ? config.getUiScale() : 1.35f;
+        float scale = (config != null) ? config.getUiScale() : 1.0f;
         float density = context.getResources().getDisplayMetrics().density;
         return Math.round(dp * density * scale);
     }
 
     private float sp(float sp) {
-        float scale = (config != null) ? config.getUiScale() : 1.35f;
+        float scale = (config != null) ? config.getUiScale() : 1.0f;
         return sp * scale;
     }
 
@@ -269,6 +281,7 @@ public class FrigatePlayerObjectDetectorController {
     }
 
     private void renderObjectBadges(Map<String, Double> activeLabels) {
+        this.lastActiveLabels = activeLabels;
         LinearLayout container = bridge.getHeaderObjectsContainer();
         if (container == null) return;
         StringBuilder keyBuilder = new StringBuilder();
@@ -287,6 +300,12 @@ public class FrigatePlayerObjectDetectorController {
             container.setVisibility(View.GONE);
             return;
         }
+
+        boolean dark = FrigateTheme.isDark(theme);
+        int textColor = dark ? Color.parseColor("#E9D5FF") : Color.parseColor("#6D28D9");
+        int bgColor = dark ? Color.parseColor("#1E1633") : Color.parseColor("#F5F3FF");
+        int strokeColor = dark ? Color.parseColor("#7C3AED") : Color.parseColor("#DDD6FE");
+
         int shown = 0;
         for (Map.Entry<String, Double> e : activeLabels.entrySet()) {
             if (shown >= 3) break;
@@ -298,19 +317,26 @@ public class FrigatePlayerObjectDetectorController {
             }
             TextView pill = new TextView(context);
             pill.setText(text);
+            pill.setTextSize(sp(11));
+            pill.setTypeface(FrigateTheme.typeface(theme, 600));
+            pill.setSingleLine(true);
+            pill.setIncludeFontPadding(false);
+            pill.setGravity(Gravity.CENTER);
+            pill.setTextColor(textColor);
+
             MaterialIcons.setIconOnTextView(pill, FrigateEvent.getMaterialIconForLabel(raw),
-                    Color.parseColor("#E9D5FF"), s(18), s(8), theme);
+                    textColor, s(13), s(5), theme);
+
             GradientDrawable lpBg = new GradientDrawable();
-            lpBg.setColor(Color.parseColor("#231B2B"));
-            lpBg.setCornerRadius(s(10));
-            lpBg.setStroke(s(1), Color.parseColor("#6B21A8"));
+            lpBg.setColor(bgColor);
+            lpBg.setCornerRadius(s(FrigateTheme.radiusControl(theme)));
+            lpBg.setStroke(s(1), strokeColor);
             pill.setBackground(lpBg);
-            pill.setPadding(s(14), s(8), s(14), s(8));
-            pill.setTextSize(sp(14));
-            pill.setTextColor(Color.parseColor("#E9D5FF"));
-            pill.setTypeface(null, android.graphics.Typeface.BOLD);
+            pill.setPadding(s(10), s(6), s(10), s(6));
+
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            lp.gravity = Gravity.CENTER_VERTICAL;
             if (shown > 0) lp.leftMargin = s(6);
             container.addView(pill, lp);
             shown++;

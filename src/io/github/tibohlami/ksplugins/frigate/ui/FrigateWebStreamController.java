@@ -67,7 +67,7 @@ public class FrigateWebStreamController {
     @SuppressLint("SetJavaScriptEnabled")
     public WebView createWebView(Context context) {
         liveWebView = new WebView(context);
-        liveWebView.setBackgroundColor(Color.BLACK);
+        liveWebView.setBackgroundColor(Color.TRANSPARENT);
         WebSettings ws = liveWebView.getSettings();
         ws.setJavaScriptEnabled(true);
         ws.setMediaPlaybackRequiresUserGesture(false);
@@ -271,8 +271,8 @@ public class FrigateWebStreamController {
         String safeWs = jsonQuote(wsUrl);
         return "<!DOCTYPE html><html><head><meta charset='utf-8'>" +
                 "<meta name='viewport' content='width=device-width,initial-scale=1,maximum-scale=1'>" +
-                "<style>html,body{margin:0;padding:0;width:100%;height:100%;background:#000;overflow:hidden;}" +
-                "video{width:100%;height:100%;object-fit:contain;background:#000;opacity:0;}</style></head><body>" +
+                "<style>html,body{margin:0;padding:0;width:100%;height:100%;background:transparent;overflow:hidden;}" +
+                "video{width:100%;height:100%;object-fit:contain;background:transparent;opacity:0;}</style></head><body>" +
                 "<video id='v' autoplay playsinline poster='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7' " + (muted ? "muted" : "") + "></video>" +
                 "<script>" +
                 "const WS_URL=" + safeWs + ";const SID=" + sessionId + ";" +
@@ -342,8 +342,8 @@ public class FrigateWebStreamController {
         String safeAuth = jsonQuote(authHeader != null ? authHeader : "");
         return "<!DOCTYPE html><html><head><meta charset='utf-8'>" +
                 "<meta name='viewport' content='width=device-width,initial-scale=1,maximum-scale=1'>" +
-                "<style>html,body{margin:0;padding:0;width:100%;height:100%;background:#000;overflow:hidden;}" +
-                "video{width:100%;height:100%;object-fit:contain;background:#000;opacity:0;}</style></head><body>" +
+                "<style>html,body{margin:0;padding:0;width:100%;height:100%;background:transparent;overflow:hidden;}" +
+                "video{width:100%;height:100%;object-fit:contain;background:transparent;opacity:0;}</style></head><body>" +
                 "<video id='v' autoplay playsinline poster='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7' " + (muted ? "muted" : "") + "></video>" +
                 "<script src='/__plugin_assets__/hls.min.js'></script>" +
                 "<script>" +

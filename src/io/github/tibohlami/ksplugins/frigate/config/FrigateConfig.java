@@ -28,7 +28,7 @@ public class FrigateConfig {
 
     public static final String DEFAULT_FRIGATE_URL = "http://frigate.local:5000";
     public static final int DEFAULT_MAX_EVENTS = 25;
-    public static final float DEFAULT_UI_SCALE = 1.35f;
+    public static final float DEFAULT_UI_SCALE = 1.0f;
     public static final boolean DEFAULT_SHOW_STREAM_MODE_PILL = true;
     public static final boolean DEFAULT_SHOW_OBJECT_BOXES_BY_DEFAULT = false;
     public static final double DEFAULT_BBOX_TIME_OFFSET_SEC = 1.0;

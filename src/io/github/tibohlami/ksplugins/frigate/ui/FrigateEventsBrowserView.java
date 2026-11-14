@@ -49,7 +49,7 @@ import java.util.Set;
 public class FrigateEventsBrowserView {
 
     private final Context context;
-    private final KsTheme theme;
+    private KsTheme theme;
     private final FrigateConfig config;
     private final AsyncImageLoader imageLoader;
     private final FrigateExplorerOverlay.EventClickListener eventClickListener;
@@ -67,7 +67,11 @@ public class FrigateEventsBrowserView {
     private LinearLayout eventsListCol;
     private TextView loadMoreBtn;
     private TextView timelineDateBtn;
+    private FrameLayout rulerWrapper;
     private FrigateTimelineRulerView timelineRuler;
+    private LinearLayout filterPanel;
+    private ImageView zoomOutBtn;
+    private ImageView zoomInBtn;
 
     private String selectedSeverity = "all"; // "all", "alert", "detection"
     private final Set<String> selectedLabels = new LinkedHashSet<>();
@@ -189,12 +193,15 @@ public class FrigateEventsBrowserView {
     }
 
     private int s(float dp) {
-        float scale = (config != null) ? config.getUiScale() : 1.35f;
+        float scale = (config != null) ? config.getUiScale() : 1.0f;
         return Math.max(1, Math.round(theme.px(Math.round(dp * scale))));
     }
 
+    /**
+     * Scales SP font sizes according to user-configured uiScale.
+     */
     private float sp(float sp) {
-        float scale = (config != null) ? config.getUiScale() : 1.35f;
+        float scale = (config != null) ? config.getUiScale() : 1.0f;
         return sp * scale;
     }
 
@@ -220,7 +227,8 @@ public class FrigateEventsBrowserView {
         emptyOrStatusView.setGravity(Gravity.CENTER);
         emptyOrStatusView.setPadding(0, s(24), 0, s(16));
         emptyOrStatusView.setTextSize(sp(14));
-        emptyOrStatusView.setTextColor(Color.parseColor("#94A3B8"));
+        emptyOrStatusView.setTextColor(FrigateTheme.onSurfaceVariant(theme));
+        emptyOrStatusView.setTypeface(FrigateTheme.typeface(theme, 400));
         leftCol.addView(emptyOrStatusView);
 
         eventsScrollView = new ScrollView(context);
@@ -330,15 +338,66 @@ public class FrigateEventsBrowserView {
         cardHighlightMap.clear();
     }
 
+    public void onThemeChanged(KsTheme newTheme) {
+        if (newTheme == null || isDestroyed) return;
+        this.theme = newTheme;
+        if (calendarModal != null) {
+            calendarModal.onThemeChanged(newTheme);
+        }
+        if (filterPanel != null) {
+            GradientDrawable bg = new GradientDrawable();
+            bg.setColor(FrigateTheme.surfaceContainerLow(theme));
+            bg.setCornerRadius(s(FrigateTheme.radiusControl(theme)));
+            bg.setStroke(s(1), FrigateTheme.outlineVariant(theme));
+            filterPanel.setBackground(bg);
+        }
+        if (zoomOutBtn != null) {
+            updateZoomButtonStyle(zoomOutBtn, MaterialIcons.ZOOM_OUT);
+        }
+        if (zoomInBtn != null) {
+            updateZoomButtonStyle(zoomInBtn, MaterialIcons.ZOOM_IN);
+        }
+        if (timelineDateBtn != null) {
+            updateTimelineDateHeader(timelineRuler != null ? timelineRuler.getCursorEpoch() : 0L);
+            timelineDateBtn.setTextColor(FrigateTheme.onSurface(theme));
+        }
+        if (timelineRuler != null) {
+            timelineRuler.setTheme(newTheme);
+        }
+        if (rulerWrapper != null) {
+            updateRulerWrapperTheme();
+        }
+        if (summaryCountView != null) {
+            summaryCountView.setTextColor(FrigateTheme.onSurfaceVariant(theme));
+            summaryCountView.setTypeface(FrigateTheme.typeface(theme, 500));
+        }
+        if (emptyOrStatusView != null) {
+            emptyOrStatusView.setTextColor(FrigateTheme.onSurfaceVariant(theme));
+            emptyOrStatusView.setTypeface(FrigateTheme.typeface(theme, 400));
+        }
+        rebuildFilterChips();
+    }
+
+    private void updateRulerWrapperTheme() {
+        if (rulerWrapper == null) return;
+        boolean isDark = FrigateTheme.isDark(theme);
+        GradientDrawable rBg = new GradientDrawable();
+        rBg.setColor(isDark ? Color.parseColor("#0B101A") : Color.parseColor("#EDF0F3"));
+        rBg.setCornerRadius(s(FrigateTheme.radiusControl(theme)));
+        rBg.setStroke(s(1), FrigateTheme.outlineVariant(theme));
+        rulerWrapper.setBackground(rBg);
+    }
+
     // --- Filter Bar ---
 
     private View buildFilterPanel() {
         LinearLayout panel = new LinearLayout(context);
+        this.filterPanel = panel;
         panel.setOrientation(LinearLayout.VERTICAL);
         GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Color.parseColor("#121622"));
-        bg.setCornerRadius(s(12));
-        bg.setStroke(s(1), Color.parseColor("#1E273A"));
+        bg.setColor(FrigateTheme.surfaceContainerLow(theme));
+        bg.setCornerRadius(s(FrigateTheme.radiusControl(theme)));
+        bg.setStroke(s(1), FrigateTheme.outlineVariant(theme));
         panel.setBackground(bg);
         int padH = s(12);
         int padV = s(8);
@@ -374,7 +433,8 @@ public class FrigateEventsBrowserView {
 
         summaryCountView = new TextView(context);
         summaryCountView.setTextSize(sp(12));
-        summaryCountView.setTextColor(Color.parseColor("#94A3B8"));
+        summaryCountView.setTextColor(FrigateTheme.onSurfaceVariant(theme));
+        summaryCountView.setTypeface(FrigateTheme.typeface(theme, 500));
         summaryCountView.setPadding(s(10), 0, 0, 0);
         summaryCountView.setSingleLine(true);
         row2.addView(summaryCountView);
@@ -429,8 +489,8 @@ public class FrigateEventsBrowserView {
         TextView tv = new TextView(context);
         tv.setText(text);
         tv.setTextSize(sp(12));
-        tv.setTextColor(Color.parseColor("#94A3B8"));
-        tv.setTypeface(null, Typeface.BOLD);
+        tv.setTextColor(FrigateTheme.onSurfaceVariant(theme));
+        tv.setTypeface(FrigateTheme.typeface(theme, 600));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         lp.rightMargin = s(6);
@@ -439,7 +499,7 @@ public class FrigateEventsBrowserView {
 
     private void addVerticalDivider(LinearLayout parent) {
         View div = new View(context);
-        div.setBackgroundColor(Color.parseColor("#2A374F"));
+        div.setBackgroundColor(FrigateTheme.outlineVariant(theme));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(s(1), s(20));
         lp.leftMargin = s(6);
         lp.rightMargin = s(12);
@@ -452,19 +512,23 @@ public class FrigateEventsBrowserView {
         chip.setText(title);
         chip.setTextSize(sp(12));
         chip.setSingleLine(true);
+        chip.setIncludeFontPadding(false);
         chip.setGravity(Gravity.CENTER_VERTICAL);
 
-        int bgColor = active ? Color.parseColor(activeColorHex) : Color.parseColor("#1A2130");
-        int strokeColor = active ? bgColor : Color.parseColor("#2A374F");
+        int activeBg = (activeColorHex != null && !activeColorHex.isEmpty())
+                ? Color.parseColor(activeColorHex)
+                : FrigateTheme.primary(theme);
+        int bgColor = active ? activeBg : FrigateTheme.surfaceContainerHigh(theme);
+        int strokeColor = active ? bgColor : FrigateTheme.outlineVariant(theme);
         GradientDrawable bg = new GradientDrawable();
         bg.setColor(bgColor);
-        bg.setCornerRadius(s(14));
+        bg.setCornerRadius(s(FrigateTheme.radiusRow(theme)));
         bg.setStroke(s(1), strokeColor);
         chip.setBackground(bg);
 
-        int textColor = active ? Color.WHITE : Color.parseColor("#CBD5E1");
+        int textColor = active ? FrigateTheme.onPrimary(theme) : FrigateTheme.onSurfaceVariant(theme);
         chip.setTextColor(textColor);
-        chip.setTypeface(null, active ? Typeface.BOLD : Typeface.NORMAL);
+        chip.setTypeface(FrigateTheme.typeface(theme, active ? 600 : 400));
         chip.setPadding(s(11), s(5), s(11), s(5));
 
         if (iconName != null) {
@@ -557,8 +621,8 @@ public class FrigateEventsBrowserView {
         timelineDateBtn.setGravity(Gravity.CENTER);
         timelineDateBtn.setSingleLine(true);
         timelineDateBtn.setTextSize(sp(12));
-        timelineDateBtn.setTextColor(Color.parseColor("#F1F5F9"));
-        timelineDateBtn.setTypeface(null, Typeface.BOLD);
+        timelineDateBtn.setTextColor(FrigateTheme.onSurface(theme));
+        timelineDateBtn.setTypeface(FrigateTheme.typeface(theme, 600));
         timelineDateBtn.setPadding(s(6), s(6), s(6), s(6));
         timelineDateBtn.setOnClickListener(v -> openCalendarModal());
         LinearLayout.LayoutParams dateLp = new LinearLayout.LayoutParams(
@@ -566,16 +630,12 @@ public class FrigateEventsBrowserView {
         dateLp.bottomMargin = s(6);
         panel.addView(timelineDateBtn, dateLp);
 
-        FrameLayout rulerWrapper = new FrameLayout(context);
-        GradientDrawable rBg = new GradientDrawable();
-        rBg.setColor(Color.parseColor("#0B101A"));
-        rBg.setCornerRadius(s(12));
-        rBg.setStroke(s(1), Color.parseColor("#1E273A"));
-        rulerWrapper.setBackground(rBg);
+        rulerWrapper = new FrameLayout(context);
+        updateRulerWrapperTheme();
         rulerWrapper.setClipToOutline(true);
 
-        float scale = (config != null) ? config.getUiScale() : 1.35f;
-        timelineRuler = new FrigateTimelineRulerView(context, scale);
+        float scale = (config != null) ? config.getUiScale() : 1.0f;
+        timelineRuler = new FrigateTimelineRulerView(context, scale, theme);
         timelineRuler.setConfig(config);
         timelineRuler.setEventBrowserMode(true);
         timelineRuler.setVisibleWindowSeconds(14400.0); // 4h default overview
@@ -632,14 +692,14 @@ public class FrigateEventsBrowserView {
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         zrLp.topMargin = s(6);
 
-        ImageView zoomOutBtn = buildZoomButton(MaterialIcons.ZOOM_OUT, tr("browser_zoom_out_desc"));
+        zoomOutBtn = buildZoomButton(MaterialIcons.ZOOM_OUT, tr("browser_zoom_out_desc"));
         zoomOutBtn.setOnClickListener(v -> {
             if (timelineRuler != null) {
                 timelineRuler.zoomOut();
                 maybeLoadMoreForViewport();
             }
         });
-        ImageView zoomInBtn = buildZoomButton(MaterialIcons.ZOOM_IN, tr("browser_zoom_in_desc"));
+        zoomInBtn = buildZoomButton(MaterialIcons.ZOOM_IN, tr("browser_zoom_in_desc"));
         zoomInBtn.setOnClickListener(v -> {
             if (timelineRuler != null) {
                 timelineRuler.zoomIn();
@@ -655,16 +715,26 @@ public class FrigateEventsBrowserView {
         return panel;
     }
 
+    private void updateZoomButtonStyle(ImageView btn, String iconName) {
+        if (btn == null) return;
+        btn.setImageDrawable(MaterialIcons.getDrawable(iconName, FrigateTheme.onSurface(theme), s(18), theme));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(FrigateTheme.surfaceContainerHigh(theme));
+        bg.setCornerRadius(s(8));
+        bg.setStroke(s(1), FrigateTheme.outlineVariant(theme));
+        btn.setBackground(bg);
+    }
+
     private ImageView buildZoomButton(String iconName, String description) {
         int iconSize = s(18);
-        ImageView btn = MaterialIcons.createIconView(context, iconName, Color.parseColor("#E2E8F0"), iconSize, theme);
+        ImageView btn = MaterialIcons.createIconView(context, iconName, FrigateTheme.onSurface(theme), iconSize, theme);
         btn.setContentDescription(description);
         int pad = s(6);
         btn.setPadding(pad, pad, pad, pad);
         GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Color.parseColor("#161D2B"));
+        bg.setColor(FrigateTheme.surfaceContainerHigh(theme));
         bg.setCornerRadius(s(8));
-        bg.setStroke(s(1), Color.parseColor("#2A374F"));
+        bg.setStroke(s(1), FrigateTheme.outlineVariant(theme));
         btn.setBackground(bg);
         return btn;
     }
@@ -683,13 +753,16 @@ public class FrigateEventsBrowserView {
         }
         timelineDateBtn.setText(label);
         GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Color.parseColor(hasExplicitDay ? "#231942" : "#161D2B"));
-        bg.setCornerRadius(s(10));
-        bg.setStroke(s(1), Color.parseColor(hasExplicitDay ? "#8B5CF6" : "#2A374F"));
+        int calBg = hasExplicitDay ? FrigateTheme.primary(theme) : FrigateTheme.surfaceContainerHigh(theme);
+        bg.setColor(calBg);
+        bg.setCornerRadius(s(FrigateTheme.radiusControl(theme)));
+        bg.setStroke(s(1), hasExplicitDay ? calBg : FrigateTheme.outlineVariant(theme));
         timelineDateBtn.setBackground(bg);
+        int calText = hasExplicitDay ? FrigateTheme.onPrimary(theme) : FrigateTheme.onSurface(theme);
+        timelineDateBtn.setTextColor(calText);
         MaterialIcons.setIconOnTextView(
                 timelineDateBtn, MaterialIcons.CALENDAR,
-                Color.parseColor(hasExplicitDay ? "#DDD6FE" : "#CBD5E1"),
+                calText,
                 s(13), s(5), theme);
     }
 
@@ -983,12 +1056,13 @@ public class FrigateEventsBrowserView {
             if (loadMoreBtn == null) {
                 loadMoreBtn = new TextView(context);
                 loadMoreBtn.setTextSize(sp(13));
-                loadMoreBtn.setTextColor(Color.parseColor("#E2E8F0"));
+                loadMoreBtn.setTextColor(FrigateTheme.onSurface(theme));
+                loadMoreBtn.setTypeface(FrigateTheme.typeface(theme, 600));
                 loadMoreBtn.setGravity(Gravity.CENTER);
                 GradientDrawable btnBg = new GradientDrawable();
-                btnBg.setColor(Color.parseColor("#182030"));
-                btnBg.setCornerRadius(s(10));
-                btnBg.setStroke(s(1), Color.parseColor("#2A374F"));
+                btnBg.setColor(FrigateTheme.surfaceContainerHigh(theme));
+                btnBg.setCornerRadius(s(FrigateTheme.radiusControl(theme)));
+                btnBg.setStroke(s(1), FrigateTheme.outlineVariant(theme));
                 loadMoreBtn.setBackground(btnBg);
                 loadMoreBtn.setPadding(s(16), s(10), s(16), s(10));
                 loadMoreBtn.setOnClickListener(v -> loadOlderPage());
@@ -1024,8 +1098,8 @@ public class FrigateEventsBrowserView {
         TextView header = new TextView(context);
         header.setText(dayLabel);
         header.setTextSize(sp(14));
-        header.setTextColor(Color.parseColor("#CBD5E1"));
-        header.setTypeface(null, Typeface.BOLD);
+        header.setTextColor(FrigateTheme.onSurface(theme));
+        header.setTypeface(FrigateTheme.typeface(theme, 600));
         header.setPadding(0, s(8), 0, s(8));
         return header;
     }
@@ -1033,8 +1107,9 @@ public class FrigateEventsBrowserView {
     private View buildEventCard(FrigateEvent event, int cardHeight) {
         FrameLayout card = new FrameLayout(context);
         GradientDrawable cardBg = new GradientDrawable();
-        cardBg.setColor(Color.parseColor("#171B26"));
-        cardBg.setCornerRadius(s(12));
+        cardBg.setColor(FrigateTheme.surfaceContainer(theme));
+        cardBg.setCornerRadius(s(FrigateTheme.radiusControl(theme)));
+        cardBg.setStroke(s(1), FrigateTheme.outlineVariant(theme));
         card.setBackground(cardBg);
         card.setClipToOutline(true);
 
@@ -1050,21 +1125,36 @@ public class FrigateEventsBrowserView {
 
         // 2. Top-left detection badge
         int m = s(7);
-        TextView badge = new TextView(context);
-        int score = (int) Math.round(event.getTopScore() * 100);
-        String labelDisplay = formatObjectLabel(event.getLabel());
-        if (score > 0) labelDisplay += " " + score + "%";
-        badge.setText(labelDisplay);
-        badge.setTextSize(sp(11));
-        badge.setTextColor(Color.WHITE);
-        badge.setTypeface(null, Typeface.BOLD);
-        MaterialIcons.setIconOnTextView(badge, event.getMaterialIconName(), Color.WHITE, s(13), s(4), theme);
-
+        LinearLayout badge = new LinearLayout(context);
+        badge.setOrientation(LinearLayout.HORIZONTAL);
+        badge.setGravity(Gravity.CENTER_VERTICAL);
         GradientDrawable bBg = new GradientDrawable();
         bBg.setColor(Color.argb(215, 15, 23, 42));
         bBg.setCornerRadius(s(8));
         badge.setBackground(bBg);
         badge.setPadding(s(7), s(3), s(7), s(3));
+
+        ImageView bIcon = MaterialIcons.createIconView(context, event.getMaterialIconName(), Color.WHITE, s(13), theme);
+        LinearLayout.LayoutParams bIconLp = new LinearLayout.LayoutParams(s(13), s(13));
+        bIconLp.gravity = Gravity.CENTER_VERTICAL;
+        bIconLp.rightMargin = s(4);
+        badge.addView(bIcon, bIconLp);
+
+        TextView bText = new TextView(context);
+        int score = (int) Math.round(event.getTopScore() * 100);
+        String labelDisplay = formatObjectLabel(event.getLabel());
+        if (score > 0) labelDisplay += " " + score + "%";
+        bText.setText(labelDisplay);
+        bText.setTextSize(sp(11));
+        bText.setTextColor(Color.WHITE);
+        bText.setTypeface(null, Typeface.BOLD);
+        bText.setIncludeFontPadding(false);
+        bText.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams bTextLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        bTextLp.gravity = Gravity.CENTER_VERTICAL;
+        badge.addView(bText, bTextLp);
+
         FrameLayout.LayoutParams bLp = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
         bLp.gravity = Gravity.TOP | Gravity.LEFT;
@@ -1113,18 +1203,21 @@ public class FrigateEventsBrowserView {
         TextView timeView = new TextView(context);
         timeView.setText(formatEventCardTime(event.getStartTime()));
         timeView.setTextSize(sp(12));
-        timeView.setTextColor(Color.parseColor("#E2E8F0"));
+        timeView.setTextColor(Color.parseColor("#F1F5F9"));
         timeView.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
         timeView.setSingleLine(true);
+        timeView.setIncludeFontPadding(false);
         bottomBar.addView(timeView);
 
         TextView camView = new TextView(context);
         camView.setText(FrigateCamera.formatName(event.getCamera()));
         camView.setTextSize(sp(11));
         camView.setTextColor(Color.parseColor("#94A3B8"));
+        camView.setTypeface(FrigateTheme.typeface(theme, 500));
         camView.setSingleLine(true);
         camView.setEllipsize(android.text.TextUtils.TruncateAt.END);
         camView.setGravity(Gravity.END);
+        camView.setIncludeFontPadding(false);
         camView.setPadding(s(6), 0, 0, 0);
         bottomBar.addView(camView, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f));
 

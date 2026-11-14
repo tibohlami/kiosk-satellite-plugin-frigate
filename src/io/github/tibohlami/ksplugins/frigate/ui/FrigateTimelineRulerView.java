@@ -13,6 +13,7 @@ import android.view.View;
 import io.github.tibohlami.ksplugins.frigate.config.FrigateConfig;
 import io.github.tibohlami.ksplugins.frigate.model.RecordingSegment;
 import io.github.tibohlami.ksplugins.frigate.model.ReviewSegment;
+import me.jxl.kiosk.plugins.KsTheme;
 
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -175,6 +176,7 @@ public class FrigateTimelineRulerView extends View {
     private final Paint clusterBadgeBorderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint clusterBadgeTextPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint tickPaint = new Paint();
+    private final Paint majorTickPaint = new Paint();
     private final Paint dayTickPaint = new Paint();
     private final Paint labelPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint dayLabelPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -186,56 +188,103 @@ public class FrigateTimelineRulerView extends View {
     private final Paint redPillTextPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF pillRect = new RectF();
     private final RectF clusterRect = new RectF();
+    private KsTheme theme;
     private FrigateConfig config;
     private SimpleDateFormat timeHmFmt;
     private SimpleDateFormat timeHmsFmt;
     private SimpleDateFormat dayLabelFmt;
 
     public FrigateTimelineRulerView(Context context, float uiScale) {
+        this(context, uiScale, null);
+    }
+
+    public FrigateTimelineRulerView(Context context, float uiScale, KsTheme theme) {
         super(context);
         this.uiScale = Math.max(0.8f, uiScale);
+        this.theme = theme;
+        applyThemeColors();
         refreshDateFormats();
         long now = System.currentTimeMillis() / 1000L;
         this.maxEpochSec = now;
         this.minEpochSec = 0L;
         this.cursorEpochSec = now;
+    }
 
-        bgPaint.setColor(Color.parseColor("#0B101A"));
-        recordedBandPaint.setColor(Color.parseColor("#131C2B"));
-        detectionBandPaint.setColor(Color.argb(62, 251, 146, 60));
-        alertBandPaint.setColor(Color.argb(82, 244, 63, 94));
-        detectionEdgePaint.setColor(Color.parseColor("#FB923C"));
-        alertEdgePaint.setColor(Color.parseColor("#F43F5E"));
-        selectedBandPaint.setColor(Color.argb(55, 255, 255, 255));
-        selectedBorderPaint.setColor(Color.WHITE);
+    public void setTheme(KsTheme theme) {
+        this.theme = theme;
+        applyThemeColors();
+        invalidate();
+    }
+
+    private void applyThemeColors() {
+        boolean dark = FrigateTheme.isDark(theme);
+
+        if (dark) {
+            bgPaint.setColor(Color.parseColor("#0B101A"));
+            recordedBandPaint.setColor(Color.parseColor("#131C2B"));
+            detectionBandPaint.setColor(Color.argb(62, 251, 146, 60));
+            alertBandPaint.setColor(Color.argb(82, 244, 63, 94));
+            detectionEdgePaint.setColor(Color.parseColor("#FB923C"));
+            alertEdgePaint.setColor(Color.parseColor("#F43F5E"));
+            selectedBandPaint.setColor(Color.argb(55, 255, 255, 255));
+            selectedBorderPaint.setColor(Color.WHITE);
+
+            clusterBadgeBorderPaint.setColor(Color.parseColor("#0B101A"));
+            clusterBadgeTextPaint.setColor(Color.WHITE);
+
+            tickPaint.setColor(Color.parseColor("#334155"));
+            majorTickPaint.setColor(Color.parseColor("#475569"));
+            dayTickPaint.setColor(Color.parseColor("#475569"));
+
+            labelPaint.setColor(Color.parseColor("#CBD5E1"));
+            dayLabelPaint.setColor(Color.parseColor("#F1F5F9"));
+
+            idleDotPaint.setColor(Color.argb(170, 245, 158, 11));
+            motionPaint.setColor(Color.parseColor("#F59E0B"));
+            futureTintPaint.setColor(Color.argb(95, 6, 9, 14));
+        } else {
+            bgPaint.setColor(Color.parseColor("#EDF0F3"));
+            recordedBandPaint.setColor(Color.parseColor("#DFE4EA"));
+            detectionBandPaint.setColor(Color.argb(55, 251, 146, 60));
+            alertBandPaint.setColor(Color.argb(75, 244, 63, 94));
+            detectionEdgePaint.setColor(Color.parseColor("#EA580C"));
+            alertEdgePaint.setColor(Color.parseColor("#E11D48"));
+            selectedBandPaint.setColor(Color.argb(40, 0, 0, 0));
+            selectedBorderPaint.setColor(Color.parseColor("#334155"));
+
+            clusterBadgeBorderPaint.setColor(Color.parseColor("#EDF0F3"));
+            clusterBadgeTextPaint.setColor(Color.WHITE);
+
+            tickPaint.setColor(Color.parseColor("#A3A3A3"));
+            majorTickPaint.setColor(Color.parseColor("#525252"));
+            dayTickPaint.setColor(Color.parseColor("#525252"));
+
+            labelPaint.setColor(Color.parseColor("#525252"));
+            dayLabelPaint.setColor(Color.parseColor("#1E293B"));
+
+            idleDotPaint.setColor(Color.argb(180, 217, 119, 6));
+            motionPaint.setColor(Color.parseColor("#F59E0B"));
+            futureTintPaint.setColor(Color.argb(55, 180, 190, 205));
+        }
+
         selectedBorderPaint.setStyle(Paint.Style.STROKE);
         selectedBorderPaint.setStrokeWidth(dp(1.5f));
 
-        clusterBadgeBorderPaint.setColor(Color.parseColor("#0B101A"));
         clusterBadgeBorderPaint.setStyle(Paint.Style.STROKE);
         clusterBadgeBorderPaint.setStrokeWidth(dp(1));
-        clusterBadgeTextPaint.setColor(Color.WHITE);
         clusterBadgeTextPaint.setTextSize(dp(9.5f));
         clusterBadgeTextPaint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
         clusterBadgeTextPaint.setTextAlign(Paint.Align.CENTER);
 
-        tickPaint.setColor(Color.parseColor("#334155"));
         tickPaint.setStrokeWidth(dp(1));
-
-        dayTickPaint.setColor(Color.parseColor("#475569"));
+        majorTickPaint.setStrokeWidth(dp(1.2f));
         dayTickPaint.setStrokeWidth(dp(1.2f));
 
-        labelPaint.setColor(Color.parseColor("#CBD5E1"));
         labelPaint.setTextSize(dp(12.5f));
         labelPaint.setTypeface(Typeface.create(Typeface.MONOSPACE, Typeface.NORMAL));
 
-        dayLabelPaint.setColor(Color.parseColor("#F1F5F9"));
         dayLabelPaint.setTextSize(dp(12.5f));
         dayLabelPaint.setTypeface(Typeface.create(Typeface.MONOSPACE, Typeface.BOLD));
-
-        idleDotPaint.setColor(Color.argb(170, 245, 158, 11));
-        motionPaint.setColor(Color.parseColor("#F59E0B"));
-        futureTintPaint.setColor(Color.argb(95, 6, 9, 14));
 
         redLinePaint.setColor(Color.parseColor("#EF4444"));
         redLinePaint.setStrokeWidth(dp(2));
@@ -845,7 +894,7 @@ public class FrigateTimelineRulerView extends View {
             if (isMidnight) {
                 canvas.drawLine(0, y, w, y, dayTickPaint);
             } else {
-                canvas.drawLine(0, y, isMajor ? majorLen : minorLen, y, tickPaint);
+                canvas.drawLine(0, y, isMajor ? majorLen : minorLen, y, isMajor ? majorTickPaint : tickPaint);
             }
             if (isMajor && y > dp(12) && y < h - dp(12)) {
                 reusableDate.setTime(t * 1000L);

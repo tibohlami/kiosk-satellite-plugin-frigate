@@ -39,12 +39,15 @@ import java.util.Map;
  */
 public class FrigateExplorerOverlay {
 
+    private static final int RECENT_EVENT_CARD_WIDTH_DP = 180;
+    private static final int RECENT_EVENT_CARD_HEIGHT_DP = 135;
+
     public interface EventClickListener {
         void onEventClick(FrigateEvent event);
     }
 
     private final Context context;
-    private final KsTheme theme;
+    private KsTheme theme;
     private final FrigateApiClient apiClient;
     private final FrigateConfig config;
     private final AsyncImageLoader imageLoader;
@@ -58,8 +61,8 @@ public class FrigateExplorerOverlay {
     }
 
     private LinearLayout mainPane;
-    private TextView homeTabBtn;
-    private TextView eventsTabBtn;
+    private LinearLayout homeTabBtn;
+    private LinearLayout eventsTabBtn;
     private ScrollView homeScrollView;
     private View eventsBrowserRoot;
     private FrigateEventsBrowserView eventsBrowser;
@@ -68,7 +71,13 @@ public class FrigateExplorerOverlay {
     private TextView eventsSectionTitle;
     private TextView camerasSectionTitle;
     private TextView statusTextView;
+    private TextView headerTitleView;
+    private View statusDotView;
+    private TextView statusSubtitleView;
+    private FrameLayout refreshBtn;
     private ImageView refreshIconView;
+    private FrameLayout closeBtn;
+    private ImageView closeIcon;
     private ObjectAnimator refreshSpinAnimator;
     private long refreshSpinStartedAtMs = 0L;
 
@@ -142,7 +151,7 @@ public class FrigateExplorerOverlay {
      * Scales DP values according to user-configured uiScale.
      */
     private int s(float dp) {
-        float scale = (config != null) ? config.getUiScale() : 1.35f;
+        float scale = (config != null) ? config.getUiScale() : 1.0f;
         return Math.max(1, Math.round(theme.px(Math.round(dp * scale))));
     }
 
@@ -150,7 +159,7 @@ public class FrigateExplorerOverlay {
      * Scales SP font sizes according to user-configured uiScale.
      */
     private float sp(float sp) {
-        float scale = (config != null) ? config.getUiScale() : 1.35f;
+        float scale = (config != null) ? config.getUiScale() : 1.0f;
         return sp * scale;
     }
 
@@ -158,7 +167,7 @@ public class FrigateExplorerOverlay {
         // Completely opaque, full screen root layout (no transparency)
         mainPane = new LinearLayout(context);
         mainPane.setOrientation(LinearLayout.VERTICAL);
-        mainPane.setBackgroundColor(Color.parseColor("#0C0E14")); // 100% solid dark
+        mainPane.setBackgroundColor(FrigateTheme.surface(theme));
         int pad = s(16);
         mainPane.setPadding(pad, pad, pad, pad);
 
@@ -171,7 +180,8 @@ public class FrigateExplorerOverlay {
         statusTextView.setGravity(Gravity.CENTER);
         statusTextView.setPadding(0, s(8), 0, s(8));
         statusTextView.setTextSize(sp(14));
-        statusTextView.setTextColor(Color.parseColor("#94A3B8"));
+        statusTextView.setTextColor(FrigateTheme.onSurfaceVariant(theme));
+        statusTextView.setTypeface(FrigateTheme.typeface(theme, 400));
         mainPane.addView(statusTextView);
 
         // Scrollable Home content (Recent Events + Cameras Grid)
@@ -186,13 +196,15 @@ public class FrigateExplorerOverlay {
         eventsSectionTitle = new TextView(context);
         eventsSectionTitle.setText(tr("section_last_events"));
         eventsSectionTitle.setTextSize(sp(18));
-        eventsSectionTitle.setTextColor(Color.parseColor("#F1F5F9"));
-        eventsSectionTitle.setPadding(0, s(4), 0, s(10));
+        eventsSectionTitle.setTextColor(FrigateTheme.onSurface(theme));
+        eventsSectionTitle.setTypeface(FrigateTheme.typeface(theme, 600));
+        eventsSectionTitle.setIncludeFontPadding(false);
+        eventsSectionTitle.setPadding(0, 0, 0, s(4));
         contentCol.addView(eventsSectionTitle);
 
         HorizontalScrollView eventsScroll = new HorizontalScrollView(context);
         eventsScroll.setHorizontalScrollBarEnabled(false);
-        eventsScroll.setPadding(0, 0, 0, s(22));
+        eventsScroll.setPadding(0, 0, 0, s(20));
 
         recentEventsContainer = new LinearLayout(context);
         recentEventsContainer.setOrientation(LinearLayout.HORIZONTAL);
@@ -203,8 +215,10 @@ public class FrigateExplorerOverlay {
         camerasSectionTitle = new TextView(context);
         camerasSectionTitle.setText(tr("section_cameras"));
         camerasSectionTitle.setTextSize(sp(18));
-        camerasSectionTitle.setTextColor(Color.parseColor("#F1F5F9"));
-        camerasSectionTitle.setPadding(0, 0, 0, s(12));
+        camerasSectionTitle.setTextColor(FrigateTheme.onSurface(theme));
+        camerasSectionTitle.setTypeface(FrigateTheme.typeface(theme, 600));
+        camerasSectionTitle.setIncludeFontPadding(false);
+        camerasSectionTitle.setPadding(0, 0, 0, s(4));
         contentCol.addView(camerasSectionTitle);
 
         camerasGridContainer = new LinearLayout(context);
@@ -245,6 +259,10 @@ public class FrigateExplorerOverlay {
         if (eventsBrowser != null) {
             eventsBrowser.onDestroy();
         }
+    }
+
+    public boolean isDestroyed() {
+        return isDestroyed;
     }
 
     private void showHomeView() {
@@ -289,26 +307,123 @@ public class FrigateExplorerOverlay {
         updateHeaderTabSelection();
     }
 
-    private void updateHeaderTabSelection() {
-        styleHeaderTab(homeTabBtn, MaterialIcons.HOME, !isEventsBrowserActive);
-        styleHeaderTab(eventsTabBtn, MaterialIcons.CALENDAR, isEventsBrowserActive);
+    public void onThemeChanged(KsTheme newTheme) {
+        if (newTheme == null || isDestroyed) return;
+        this.theme = newTheme;
+        if (eventsBrowser != null) {
+            eventsBrowser.onThemeChanged(newTheme);
+        }
+        applyTheme();
     }
 
-    private void styleHeaderTab(TextView btn, String iconName, boolean active) {
-        if (btn == null) return;
-        GradientDrawable bg = new GradientDrawable();
-        bg.setCornerRadius(s(12));
-        if (active) {
-            bg.setColor(Color.parseColor("#E53935"));
-        } else {
-            bg.setColor(Color.parseColor("#182030"));
-            bg.setStroke(s(1), Color.parseColor("#2A374F"));
+    private void applyTheme() {
+        if (mainPane != null) {
+            mainPane.setBackgroundColor(FrigateTheme.surface(theme));
         }
-        btn.setBackground(bg);
-        int textColor = active ? Color.WHITE : Color.parseColor("#CBD5E1");
-        btn.setTextColor(textColor);
-        btn.setTypeface(null, active ? android.graphics.Typeface.BOLD : android.graphics.Typeface.NORMAL);
-        MaterialIcons.setIconOnTextView(btn, iconName, textColor, s(15), s(6), theme);
+        if (headerTitleView != null) {
+            headerTitleView.setTextColor(FrigateTheme.onSurface(theme));
+            headerTitleView.setTypeface(FrigateTheme.typeface(theme, 700));
+        }
+        if (statusDotView != null) {
+            GradientDrawable dotBg = new GradientDrawable();
+            dotBg.setShape(GradientDrawable.OVAL);
+            dotBg.setColor(FrigateTheme.success(theme));
+            statusDotView.setBackground(dotBg);
+        }
+        if (statusSubtitleView != null) {
+            statusSubtitleView.setTextColor(FrigateTheme.success(theme));
+            statusSubtitleView.setTypeface(FrigateTheme.typeface(theme, 500));
+        }
+        if (refreshBtn != null) {
+            FrigateUiUtils.applyCloseButtonFeedback(
+                    refreshBtn,
+                    FrigateTheme.surfaceContainerHigh(theme),
+                    FrigateTheme.surfaceContainerHighest(theme),
+                    FrigateTheme.outlineVariant(theme),
+                    FrigateTheme.outline(theme),
+                    s(FrigateTheme.radiusControl(theme)),
+                    s(1)
+            );
+        }
+        if (refreshIconView != null) {
+            refreshIconView.setImageDrawable(
+                    MaterialIcons.getDrawable(MaterialIcons.REFRESH, FrigateTheme.onSurfaceVariant(theme), s(20), theme));
+        }
+        if (closeBtn != null) {
+            int errColor = FrigateTheme.error(theme);
+            int errBgNormal = Color.argb(35, Color.red(errColor), Color.green(errColor), Color.blue(errColor));
+            int errBgPressed = Color.argb(85, Color.red(errColor), Color.green(errColor), Color.blue(errColor));
+            int errStrokeNormal = Color.argb(95, Color.red(errColor), Color.green(errColor), Color.blue(errColor));
+            FrigateUiUtils.applyCloseButtonFeedback(
+                    closeBtn,
+                    errBgNormal,
+                    errBgPressed,
+                    errStrokeNormal,
+                    errColor,
+                    s(FrigateTheme.radiusControl(theme)),
+                    s(1)
+            );
+        }
+        if (closeIcon != null) {
+            closeIcon.setImageDrawable(
+                    MaterialIcons.getDrawable(MaterialIcons.CLOSE, FrigateTheme.error(theme), s(20), theme));
+        }
+        if (statusTextView != null) {
+            statusTextView.setTextColor(FrigateTheme.onSurfaceVariant(theme));
+            statusTextView.setTypeface(FrigateTheme.typeface(theme, 400));
+        }
+        if (eventsSectionTitle != null) {
+            eventsSectionTitle.setTextColor(FrigateTheme.onSurface(theme));
+            eventsSectionTitle.setTypeface(FrigateTheme.typeface(theme, 600));
+        }
+        if (camerasSectionTitle != null) {
+            camerasSectionTitle.setTextColor(FrigateTheme.onSurface(theme));
+            camerasSectionTitle.setTypeface(FrigateTheme.typeface(theme, 600));
+        }
+        updateHeaderTabSelection();
+        renderRecentEvents();
+        renderCamerasGrid();
+    }
+
+    private static class HeaderTabViews {
+        final ImageView iv;
+        final TextView tv;
+        final GradientDrawable bg;
+        final String iconName;
+
+        HeaderTabViews(ImageView iv, TextView tv, GradientDrawable bg, String iconName) {
+            this.iv = iv;
+            this.tv = tv;
+            this.bg = bg;
+            this.iconName = iconName;
+        }
+    }
+
+    private void updateHeaderTabSelection() {
+        styleHeaderTab(homeTabBtn, !isEventsBrowserActive);
+        styleHeaderTab(eventsTabBtn, isEventsBrowserActive);
+    }
+
+    private void styleHeaderTab(LinearLayout tab, boolean active) {
+        if (tab == null) return;
+        Object tag = tab.getTag();
+        if (!(tag instanceof HeaderTabViews)) return;
+        HeaderTabViews views = (HeaderTabViews) tag;
+        int textColor;
+        if (active) {
+            views.bg.setColor(FrigateTheme.primary(theme));
+            views.bg.setStroke(0, 0);
+            textColor = FrigateTheme.onPrimary(theme);
+            views.tv.setTypeface(FrigateTheme.typeface(theme, 600));
+        } else {
+            views.bg.setColor(FrigateTheme.surfaceContainerHigh(theme));
+            views.bg.setStroke(s(1), FrigateTheme.outlineVariant(theme));
+            textColor = FrigateTheme.onSurfaceVariant(theme);
+            views.tv.setTypeface(FrigateTheme.typeface(theme, 500));
+        }
+        tab.setBackground(views.bg);
+        views.iv.setImageDrawable(MaterialIcons.getDrawable(views.iconName, textColor, s(16), theme));
+        views.tv.setTextColor(textColor);
     }
 
     private View buildHeaderBar() {
@@ -317,17 +432,17 @@ public class FrigateExplorerOverlay {
         header.setGravity(Gravity.CENTER_VERTICAL);
         header.setPadding(0, 0, 0, s(14));
 
-        // 1. Compact Frigate badge icon + Title
+        // 1. Compact Frigate badge icon + Title (keeps original RED badge)
         FrameLayout logoView = new FrameLayout(context);
         GradientDrawable logoBg = new GradientDrawable();
         logoBg.setColor(Color.parseColor("#E53935"));
         logoBg.setCornerRadius(s(10));
         logoView.setBackground(logoBg);
-        int logoSize = s(36);
+        int logoSize = s(40);
         LinearLayout.LayoutParams logoLp = new LinearLayout.LayoutParams(logoSize, logoSize);
-        logoLp.rightMargin = s(10);
+        logoLp.rightMargin = s(12);
         logoView.setLayoutParams(logoLp);
-        int logoIconSize = s(20);
+        int logoIconSize = s(26);
         ImageView logoIcon = MaterialIcons.createIconView(context, MaterialIcons.CAMERA, Color.WHITE, logoIconSize, theme);
         FrameLayout.LayoutParams liLp = new FrameLayout.LayoutParams(logoIconSize, logoIconSize);
         liLp.gravity = Gravity.CENTER;
@@ -339,37 +454,64 @@ public class FrigateExplorerOverlay {
         titleCol.setGravity(Gravity.CENTER_VERTICAL);
 
         TextView titleView = new TextView(context);
+        this.headerTitleView = titleView;
         titleView.setText(tr("app_name"));
-        titleView.setTextSize(sp(20));
-        titleView.setTextColor(Color.WHITE);
-        titleView.setTypeface(null, android.graphics.Typeface.BOLD);
+        titleView.setTextSize(sp(18));
+        titleView.setTextColor(FrigateTheme.onSurface(theme));
+        titleView.setTypeface(FrigateTheme.typeface(theme, 700));
         titleView.setMaxLines(1);
+        titleView.setIncludeFontPadding(false);
         titleCol.addView(titleView, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
+        // Perfectly aligned "Connected" status row
+        LinearLayout statusRow = new LinearLayout(context);
+        statusRow.setOrientation(LinearLayout.HORIZONTAL);
+        statusRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        int succColor = FrigateTheme.success(theme);
+        View dot = new View(context);
+        this.statusDotView = dot;
+        GradientDrawable dotBg = new GradientDrawable();
+        dotBg.setShape(GradientDrawable.OVAL);
+        dotBg.setColor(succColor);
+        dot.setBackground(dotBg);
+        int dotSize = s(7);
+        LinearLayout.LayoutParams dotLp = new LinearLayout.LayoutParams(dotSize, dotSize);
+        dotLp.gravity = Gravity.CENTER_VERTICAL;
+        dotLp.rightMargin = s(6);
+        statusRow.addView(dot, dotLp);
+
         TextView statusSubtitle = new TextView(context);
+        this.statusSubtitleView = statusSubtitle;
         statusSubtitle.setText(tr("common_connected"));
         statusSubtitle.setTextSize(sp(11));
-        statusSubtitle.setTextColor(Color.parseColor("#10B981"));
+        statusSubtitle.setTextColor(succColor);
+        statusSubtitle.setTypeface(FrigateTheme.typeface(theme, 500));
         statusSubtitle.setSingleLine(true);
         statusSubtitle.setIncludeFontPadding(false);
-        MaterialIcons.setIconOnTextView(statusSubtitle, MaterialIcons.LIVE, Color.parseColor("#10B981"), s(10), s(5), theme);
+        statusSubtitle.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout.LayoutParams subLp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        subLp.topMargin = s(2);
-        titleCol.addView(statusSubtitle, subLp);
+        subLp.gravity = Gravity.CENTER_VERTICAL;
+        statusRow.addView(statusSubtitle, subLp);
+
+        LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        rowLp.topMargin = s(3);
+        titleCol.addView(statusRow, rowLp);
 
         header.addView(titleCol, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
         // 2. Top navigation tabs
-        homeTabBtn = buildHeaderTab(tr("tab_home"), v -> showHomeView());
+        homeTabBtn = buildHeaderTab(tr("tab_home"), MaterialIcons.HOME, !isEventsBrowserActive, v -> showHomeView());
         LinearLayout.LayoutParams homeLp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         homeLp.leftMargin = s(18);
         header.addView(homeTabBtn, homeLp);
 
-        eventsTabBtn = buildHeaderTab(tr("tab_events"), v -> openEventsBrowser());
+        eventsTabBtn = buildHeaderTab(tr("tab_events"), MaterialIcons.CALENDAR, isEventsBrowserActive, v -> openEventsBrowser());
         LinearLayout.LayoutParams eventsLp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         eventsLp.leftMargin = s(8);
@@ -383,13 +525,14 @@ public class FrigateExplorerOverlay {
         // 3. Refresh icon button on the right, next to Close button
         int actionBtnSize = s(36);
         FrameLayout refreshBtn = new FrameLayout(context);
+        this.refreshBtn = refreshBtn;
         FrigateUiUtils.applyCloseButtonFeedback(
                 refreshBtn,
-                Color.parseColor("#182030"),
-                Color.parseColor("#26334D"),
-                Color.parseColor("#2A374F"),
-                Color.parseColor("#64748B"),
-                s(10),
+                FrigateTheme.surfaceContainerHigh(theme),
+                FrigateTheme.surfaceContainerHighest(theme),
+                FrigateTheme.outlineVariant(theme),
+                FrigateTheme.outline(theme),
+                s(FrigateTheme.radiusControl(theme)),
                 s(1)
         );
         LinearLayout.LayoutParams refLp = new LinearLayout.LayoutParams(actionBtnSize, actionBtnSize);
@@ -398,7 +541,7 @@ public class FrigateExplorerOverlay {
 
         int refIconSize = s(20);
         refreshIconView = MaterialIcons.createIconView(
-                context, MaterialIcons.REFRESH, Color.parseColor("#CBD5E1"), refIconSize, theme);
+                context, MaterialIcons.REFRESH, FrigateTheme.onSurfaceVariant(theme), refIconSize, theme);
         FrameLayout.LayoutParams rflp = new FrameLayout.LayoutParams(refIconSize, refIconSize);
         rflp.gravity = Gravity.CENTER;
         refreshBtn.addView(refreshIconView, rflp);
@@ -413,26 +556,32 @@ public class FrigateExplorerOverlay {
         header.addView(refreshBtn);
 
         // 5. Close button at top-right
+        int errColor = FrigateTheme.error(theme);
+        int errBgNormal = Color.argb(35, Color.red(errColor), Color.green(errColor), Color.blue(errColor));
+        int errBgPressed = Color.argb(85, Color.red(errColor), Color.green(errColor), Color.blue(errColor));
+        int errStrokeNormal = Color.argb(95, Color.red(errColor), Color.green(errColor), Color.blue(errColor));
+
         FrameLayout closeBtn = new FrameLayout(context);
+        this.closeBtn = closeBtn;
         FrigateUiUtils.applyCloseButtonFeedback(
                 closeBtn,
-                Color.parseColor("#261418"),
-                Color.parseColor("#7F1D1D"),
-                Color.parseColor("#5C1D24"),
-                Color.parseColor("#EF4444"),
-                s(10),
+                errBgNormal,
+                errBgPressed,
+                errStrokeNormal,
+                errColor,
+                s(FrigateTheme.radiusControl(theme)),
                 s(1)
         );
         closeBtn.setLayoutParams(new LinearLayout.LayoutParams(actionBtnSize, actionBtnSize));
 
         int closeIconSize = s(20);
         ImageView closeIcon = MaterialIcons.createIconView(
-                context, MaterialIcons.CLOSE, Color.parseColor("#EF4444"), closeIconSize, theme);
+                context, MaterialIcons.CLOSE, errColor, closeIconSize, theme);
+        this.closeIcon = closeIcon;
         FrameLayout.LayoutParams cllp = new FrameLayout.LayoutParams(closeIconSize, closeIconSize);
         cllp.gravity = Gravity.CENTER;
         closeBtn.addView(closeIcon, cllp);
         closeBtn.setOnClickListener(v -> {
-            if (isDestroyed) return;
             FrigateUiUtils.markButtonClosing(v);
             if (onClose != null) onClose.run();
         });
@@ -441,14 +590,44 @@ public class FrigateExplorerOverlay {
         return header;
     }
 
-    private TextView buildHeaderTab(String label, View.OnClickListener onClick) {
-        TextView tab = new TextView(context);
-        tab.setText(label);
-        tab.setTextSize(sp(13));
-        tab.setSingleLine(true);
+    private LinearLayout buildHeaderTab(String label, String iconName, boolean active, View.OnClickListener onClick) {
+        LinearLayout tab = new LinearLayout(context);
+        tab.setOrientation(LinearLayout.HORIZONTAL);
         tab.setGravity(Gravity.CENTER_VERTICAL);
-        tab.setPadding(s(12), s(7), s(12), s(7));
+        tab.setPadding(s(13), s(8), s(13), s(8));
         tab.setOnClickListener(onClick);
+
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(s(FrigateTheme.radiusControl(theme)));
+        int textColor = active ? FrigateTheme.onPrimary(theme) : FrigateTheme.onSurfaceVariant(theme);
+        if (active) {
+            bg.setColor(FrigateTheme.primary(theme));
+        } else {
+            bg.setColor(FrigateTheme.surfaceContainerHigh(theme));
+            bg.setStroke(s(1), FrigateTheme.outlineVariant(theme));
+        }
+        tab.setBackground(bg);
+
+        ImageView iv = MaterialIcons.createIconView(context, iconName, textColor, s(16), theme);
+        LinearLayout.LayoutParams ivLp = new LinearLayout.LayoutParams(s(16), s(16));
+        ivLp.gravity = Gravity.CENTER_VERTICAL;
+        ivLp.rightMargin = s(7);
+        tab.addView(iv, ivLp);
+
+        TextView tv = new TextView(context);
+        tv.setText(label);
+        tv.setTextSize(sp(13));
+        tv.setTextColor(textColor);
+        tv.setTypeface(FrigateTheme.typeface(theme, active ? 600 : 500));
+        tv.setSingleLine(true);
+        tv.setIncludeFontPadding(false);
+        tv.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams tvLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        tvLp.gravity = Gravity.CENTER_VERTICAL;
+        tab.addView(tv, tvLp);
+
+        tab.setTag(new HeaderTabViews(iv, tv, bg, iconName));
         return tab;
     }
 
@@ -566,6 +745,7 @@ public class FrigateExplorerOverlay {
 
     private boolean haveEventsChanged(List<FrigateEvent> current, List<FrigateEvent> next) {
         if (next == null) return !current.isEmpty();
+        if (current.isEmpty()) return true;
         if (current.size() != next.size()) return true;
         for (int i = 0; i < current.size(); i++) {
             FrigateEvent a = current.get(i);
@@ -592,7 +772,8 @@ public class FrigateExplorerOverlay {
             TextView emptyText = new TextView(context);
             emptyText.setText(tr("explorer_no_events_filter"));
             emptyText.setTextSize(sp(14));
-            emptyText.setTextColor(Color.parseColor("#64748B"));
+            emptyText.setTextColor(FrigateTheme.onSurfaceVariant(theme));
+            emptyText.setTypeface(FrigateTheme.typeface(theme, 400));
             emptyText.setPadding(0, s(16), 0, s(16));
             recentEventsContainer.addView(emptyText);
             return;
@@ -605,15 +786,16 @@ public class FrigateExplorerOverlay {
 
     private View buildRecentEventCard(FrigateEvent event) {
         FrameLayout card = new FrameLayout(context);
-        int cardWidth = s(180);
-        int cardHeight = s(135);
+        int cardWidth = s(RECENT_EVENT_CARD_WIDTH_DP);
+        int cardHeight = s(RECENT_EVENT_CARD_HEIGHT_DP);
         LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(cardWidth, cardHeight);
         cardLp.rightMargin = s(12);
         card.setLayoutParams(cardLp);
 
         GradientDrawable cardBg = new GradientDrawable();
-        cardBg.setColor(Color.parseColor("#171B26"));
-        cardBg.setCornerRadius(s(12));
+        cardBg.setColor(FrigateTheme.surfaceContainer(theme));
+        cardBg.setCornerRadius(s(FrigateTheme.radiusControl(theme)));
+        cardBg.setStroke(s(1), FrigateTheme.outlineVariant(theme));
         card.setBackground(cardBg);
         card.setClipToOutline(true);
 
@@ -624,47 +806,74 @@ public class FrigateExplorerOverlay {
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         imageLoader.load(event.getEffectiveThumbnailUrl(apiClient.getThumbnailUrl(event.getId())), thumbView);
 
-        // 2. Top-left Detection Badge with Material vector icon
-        TextView badge = new TextView(context);
+        // 2. Top-left Detection Badge matching Events page dimensions
+        int m = s(7);
+        LinearLayout badge = new LinearLayout(context);
+        badge.setOrientation(LinearLayout.HORIZONTAL);
+        badge.setGravity(Gravity.CENTER_VERTICAL);
+        GradientDrawable bBg = new GradientDrawable();
+        bBg.setColor(Color.argb(215, 15, 23, 42));
+        bBg.setCornerRadius(s(8));
+        badge.setBackground(bBg);
+        badge.setPadding(s(7), s(3), s(7), s(3));
+
+        ImageView bIcon = MaterialIcons.createIconView(context, event.getMaterialIconName(), Color.WHITE, s(13), theme);
+        LinearLayout.LayoutParams bIconLp = new LinearLayout.LayoutParams(s(13), s(13));
+        bIconLp.gravity = Gravity.CENTER_VERTICAL;
+        bIconLp.rightMargin = s(4);
+        badge.addView(bIcon, bIconLp);
+
+        TextView bText = new TextView(context);
         int score = (int) Math.round(event.getTopScore() * 100);
         String labelDisplay = FrigateI18n.translateObjectLabel(context, config, event.getLabel());
         if (score > 0) labelDisplay += " " + score + "%";
-        badge.setText(labelDisplay);
-        badge.setTextSize(sp(11));
-        badge.setTextColor(Color.WHITE);
-        badge.setTypeface(null, android.graphics.Typeface.BOLD);
-        MaterialIcons.setIconOnTextView(badge, event.getMaterialIconName(), Color.WHITE, s(14), s(5), theme);
+        bText.setText(labelDisplay);
+        bText.setTextSize(sp(11));
+        bText.setTextColor(Color.WHITE);
+        bText.setTypeface(FrigateTheme.typeface(theme, 600));
+        bText.setIncludeFontPadding(false);
+        bText.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams bTextLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        bTextLp.gravity = Gravity.CENTER_VERTICAL;
+        badge.addView(bText, bTextLp);
 
-        GradientDrawable bBg = new GradientDrawable();
-        bBg.setColor(Color.argb(210, 15, 23, 42));
-        bBg.setCornerRadius(s(8));
-        badge.setBackground(bBg);
-        badge.setPadding(s(8), s(4), s(8), s(4));
         FrameLayout.LayoutParams bLp = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
         bLp.gravity = Gravity.TOP | Gravity.LEFT;
-        int m = s(8);
         bLp.setMargins(m, m, 0, 0);
         card.addView(badge, bLp);
 
-        // 2b. Top-right Duration Badge (when event has a valid duration)
-        if (event.getEndTime() > event.getStartTime() && Math.round(event.getDurationSeconds()) > 0) {
-            TextView durBadge = new TextView(context);
-            durBadge.setText(event.getFormattedDuration(context, config));
-            durBadge.setTextSize(sp(11));
-            durBadge.setTextColor(Color.parseColor("#E2E8F0"));
-            durBadge.setTypeface(null, android.graphics.Typeface.BOLD);
-            GradientDrawable dBg = new GradientDrawable();
-            dBg.setColor(Color.argb(210, 15, 23, 42));
-            dBg.setCornerRadius(s(8));
-            durBadge.setBackground(dBg);
-            durBadge.setPadding(s(7), s(4), s(7), s(4));
-            FrameLayout.LayoutParams dLp = new FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
-            dLp.gravity = Gravity.TOP | Gravity.RIGHT;
-            dLp.setMargins(0, m, m, 0);
-            card.addView(durBadge, dLp);
+        // 2b. Top-right Severity + Duration Pill (exact same as Events page)
+        String severity = (event.getSeverity() != null && !event.getSeverity().isEmpty())
+                ? event.getSeverity()
+                : "detection";
+        boolean isAlert = "alert".equalsIgnoreCase(severity);
+        TextView typeBadge = new TextView(context);
+        String typeText = tr(isAlert ? "browser_badge_alert" : "browser_badge_detection");
+        String dur = event.getFormattedDuration(context, config);
+        if (dur != null && !dur.isEmpty()) {
+            typeText += " · " + dur;
         }
+        if (!event.hasClip()) {
+            typeText += " · " + tr("browser_badge_no_video");
+        }
+        typeBadge.setText(typeText);
+        typeBadge.setTextSize(sp(10));
+        typeBadge.setTextColor(Color.WHITE);
+        typeBadge.setTypeface(FrigateTheme.typeface(theme, 600));
+        typeBadge.setIncludeFontPadding(false);
+        typeBadge.setGravity(Gravity.CENTER_VERTICAL);
+        GradientDrawable tbBg = new GradientDrawable();
+        tbBg.setColor(isAlert ? Color.argb(225, 225, 29, 72) : Color.argb(215, 217, 119, 6));
+        tbBg.setCornerRadius(s(8));
+        typeBadge.setBackground(tbBg);
+        typeBadge.setPadding(s(6), s(3), s(6), s(3));
+        FrameLayout.LayoutParams tbLp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
+        tbLp.gravity = Gravity.TOP | Gravity.RIGHT;
+        tbLp.setMargins(0, m, m, 0);
+        card.addView(typeBadge, tbLp);
 
         // 3. Bottom Gradient overlay bar with Camera & Time
         LinearLayout bottomBar = new LinearLayout(context);
@@ -679,8 +888,9 @@ public class FrigateExplorerOverlay {
         TextView timeView = new TextView(context);
         timeView.setText(formatShortTime(event.getStartTime()));
         timeView.setTextSize(sp(12));
-        timeView.setTextColor(Color.parseColor("#CBD5E1"));
+        timeView.setTextColor(Color.parseColor("#F1F5F9"));
         timeView.setSingleLine(true);
+        timeView.setIncludeFontPadding(false);
         bottomBar.addView(timeView);
 
         TextView camView = new TextView(context);
@@ -690,6 +900,7 @@ public class FrigateExplorerOverlay {
         camView.setSingleLine(true);
         camView.setEllipsize(android.text.TextUtils.TruncateAt.END);
         camView.setGravity(Gravity.END);
+        camView.setIncludeFontPadding(false);
         camView.setPadding(s(6), 0, 0, 0);
         bottomBar.addView(camView, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f));
 
@@ -801,7 +1012,7 @@ public class FrigateExplorerOverlay {
             usableGridHeight = Math.max(s(240), dm.heightPixels - estChrome);
         }
         int twoRowFitHeight = (usableGridHeight - rowGap) / 2;
-        int minH = s(110);
+        int minH = s(RECENT_EVENT_CARD_HEIGHT_DP); // Camera cards must be at least the height of recent event thumbnails
         return Math.max(minH, Math.min(ideal16x9Height, twoRowFitHeight));
     }
 
@@ -850,9 +1061,12 @@ public class FrigateExplorerOverlay {
                 FrameLayout.LayoutParams.MATCH_PARENT, cardHeight));
 
         GradientDrawable cardBg = new GradientDrawable();
-        cardBg.setColor(Color.parseColor("#000000")); // Black backdrop for clean aspect-ratio letterboxing
-        cardBg.setCornerRadius(s(14));
-        cardBg.setStroke(s(1), Color.parseColor("#1E2536"));
+        int cardBgColor = FrigateTheme.isDark(theme)
+                ? Color.parseColor("#000000")
+                : FrigateTheme.surfaceContainer(theme);
+        cardBg.setColor(cardBgColor); // Clean aspect-ratio backdrop adapted to dark/light theme
+        cardBg.setCornerRadius(s(FrigateTheme.radiusRow(theme)));
+        cardBg.setStroke(s(1), FrigateTheme.outlineVariant(theme));
         card.setBackground(cardBg);
         card.setClipToOutline(true);
 
@@ -865,18 +1079,33 @@ public class FrigateExplorerOverlay {
         imageLoader.loadFresh(apiClient.getLatestFrameUrl(camera.getName()) + "?t=" + System.currentTimeMillis(), camPreview);
 
         // 2. Camera Name Pill on Bottom-Left with Material Camera icon
-        TextView nameBadge = new TextView(context);
-        nameBadge.setText(camera.getFriendlyName());
-        nameBadge.setTextSize(sp(13));
-        nameBadge.setTextColor(Color.WHITE);
-        nameBadge.setTypeface(null, android.graphics.Typeface.BOLD);
-        MaterialIcons.setIconOnTextView(nameBadge, MaterialIcons.CAMERA, Color.WHITE, s(16), s(6), theme);
-
+        LinearLayout nameBadge = new LinearLayout(context);
+        nameBadge.setOrientation(LinearLayout.HORIZONTAL);
+        nameBadge.setGravity(Gravity.CENTER_VERTICAL);
         GradientDrawable nbBg = new GradientDrawable();
         nbBg.setColor(Color.argb(225, 15, 23, 42));
         nbBg.setCornerRadius(s(10));
         nameBadge.setBackground(nbBg);
-        nameBadge.setPadding(s(12), s(6), s(12), s(6));
+        nameBadge.setPadding(s(10), s(6), s(12), s(6));
+
+        ImageView nbIcon = MaterialIcons.createIconView(context, MaterialIcons.CAMERA, Color.WHITE, s(16), theme);
+        LinearLayout.LayoutParams nbIconLp = new LinearLayout.LayoutParams(s(16), s(16));
+        nbIconLp.gravity = Gravity.CENTER_VERTICAL;
+        nbIconLp.rightMargin = s(6);
+        nameBadge.addView(nbIcon, nbIconLp);
+
+        TextView nbText = new TextView(context);
+        nbText.setText(camera.getFriendlyName());
+        nbText.setTextSize(sp(13));
+        nbText.setTextColor(Color.WHITE);
+        nbText.setTypeface(FrigateTheme.typeface(theme, 600));
+        nbText.setIncludeFontPadding(false);
+        nbText.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams nbTextLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        nbTextLp.gravity = Gravity.CENTER_VERTICAL;
+        nameBadge.addView(nbText, nbTextLp);
+
         FrameLayout.LayoutParams nbLp = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
         nbLp.gravity = Gravity.BOTTOM | Gravity.LEFT;
@@ -890,32 +1119,64 @@ public class FrigateExplorerOverlay {
         actionsRow.setGravity(Gravity.CENTER_VERTICAL);
 
         // Filter events button
-        TextView eventsBtn = new TextView(context);
-        eventsBtn.setText(tr("camera_btn_events"));
-        eventsBtn.setTextSize(sp(12));
-        eventsBtn.setTextColor(Color.WHITE);
-        eventsBtn.setTypeface(null, android.graphics.Typeface.BOLD);
-        MaterialIcons.setIconOnTextView(eventsBtn, MaterialIcons.MOVIE, Color.WHITE, s(15), s(6), theme);
+        LinearLayout eventsBtn = new LinearLayout(context);
+        eventsBtn.setOrientation(LinearLayout.HORIZONTAL);
+        eventsBtn.setGravity(Gravity.CENTER_VERTICAL);
         GradientDrawable ebBg = new GradientDrawable();
         ebBg.setColor(Color.argb(225, 30, 41, 59));
         ebBg.setCornerRadius(s(10));
         eventsBtn.setBackground(ebBg);
-        eventsBtn.setPadding(s(12), s(6), s(12), s(6));
+        eventsBtn.setPadding(s(10), s(6), s(12), s(6));
+
+        ImageView ebIcon = MaterialIcons.createIconView(context, MaterialIcons.MOVIE, Color.WHITE, s(15), theme);
+        LinearLayout.LayoutParams ebIconLp = new LinearLayout.LayoutParams(s(15), s(15));
+        ebIconLp.gravity = Gravity.CENTER_VERTICAL;
+        ebIconLp.rightMargin = s(6);
+        eventsBtn.addView(ebIcon, ebIconLp);
+
+        TextView ebText = new TextView(context);
+        ebText.setText(tr("camera_btn_events"));
+        ebText.setTextSize(sp(12));
+        ebText.setTextColor(Color.WHITE);
+        ebText.setTypeface(FrigateTheme.typeface(theme, 600));
+        ebText.setIncludeFontPadding(false);
+        ebText.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams ebTextLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        ebTextLp.gravity = Gravity.CENTER_VERTICAL;
+        eventsBtn.addView(ebText, ebTextLp);
+
         eventsBtn.setOnClickListener(v -> openEventsBrowser(camera.getName()));
         actionsRow.addView(eventsBtn);
 
-        // Live stream button
-        TextView playBtn = new TextView(context);
-        playBtn.setText(tr("camera_btn_live"));
-        playBtn.setTextSize(sp(12));
-        playBtn.setTextColor(Color.WHITE);
-        playBtn.setTypeface(null, android.graphics.Typeface.BOLD);
-        MaterialIcons.setIconOnTextView(playBtn, MaterialIcons.PLAY, Color.WHITE, s(16), s(6), theme);
+        // Live stream button (kept in RED #E53935 per user requirement)
+        LinearLayout playBtn = new LinearLayout(context);
+        playBtn.setOrientation(LinearLayout.HORIZONTAL);
+        playBtn.setGravity(Gravity.CENTER_VERTICAL);
         GradientDrawable pbBg = new GradientDrawable();
-        pbBg.setColor(Color.parseColor("#E53935")); // Frigate red
+        pbBg.setColor(Color.parseColor("#E53935"));
         pbBg.setCornerRadius(s(10));
         playBtn.setBackground(pbBg);
-        playBtn.setPadding(s(14), s(6), s(14), s(6));
+        playBtn.setPadding(s(11), s(6), s(13), s(6));
+
+        ImageView pbIcon = MaterialIcons.createIconView(context, MaterialIcons.PLAY, Color.WHITE, s(16), theme);
+        LinearLayout.LayoutParams pbIconLp = new LinearLayout.LayoutParams(s(16), s(16));
+        pbIconLp.gravity = Gravity.CENTER_VERTICAL;
+        pbIconLp.rightMargin = s(6);
+        playBtn.addView(pbIcon, pbIconLp);
+
+        TextView pbText = new TextView(context);
+        pbText.setText(tr("camera_btn_live"));
+        pbText.setTextSize(sp(12));
+        pbText.setTextColor(Color.WHITE);
+        pbText.setTypeface(FrigateTheme.typeface(theme, 600));
+        pbText.setIncludeFontPadding(false);
+        pbText.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams pbTextLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        pbTextLp.gravity = Gravity.CENTER_VERTICAL;
+        playBtn.addView(pbText, pbTextLp);
+
         LinearLayout.LayoutParams pbLp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         pbLp.leftMargin = s(8);

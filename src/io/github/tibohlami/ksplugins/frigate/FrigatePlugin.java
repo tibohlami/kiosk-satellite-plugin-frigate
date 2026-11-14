@@ -69,6 +69,7 @@ public final class FrigatePlugin implements KioskPlugin {
     private boolean isExplorerOpen = false;
     private boolean isPlayerOpen = false;
     private FrigateExplorerOverlay activeExplorerOverlay = null;
+    private FrigatePlayerOverlay activePlayerOverlay = null;
     private long explorerOverlayGeneration = 0L;
     private long playerOverlayGeneration = 0L;
     private FrigateEvent lastPlayerEvent = null;
@@ -262,11 +263,15 @@ public final class FrigatePlugin implements KioskPlugin {
             if (payload != null) {
                 Object key = payload.get("key");
                 if (OVERLAY_EXPLORER.equals(key)) {
-                    isExplorerOpen = false;
+                    if (activeExplorerOverlay == null || activeExplorerOverlay.isDestroyed()) {
+                        isExplorerOpen = false;
+                    }
                 } else if (OVERLAY_PLAYER.equals(key)) {
-                    isPlayerOpen = false;
-                    activeSelectCamera = SELECT_OPTION_CLOSED;
-                    publishCurrentCameraSelectState();
+                    if (activePlayerOverlay == null || activePlayerOverlay.isDestroyed()) {
+                        isPlayerOpen = false;
+                        activeSelectCamera = SELECT_OPTION_CLOSED;
+                        publishCurrentCameraSelectState();
+                    }
                 }
             }
         } else if (("select." + ENTITY_CAMERA_SELECT).equals(event) && payload != null) {
@@ -571,6 +576,8 @@ public final class FrigatePlugin implements KioskPlugin {
         this.config = null;
         this.isExplorerOpen = false;
         this.isPlayerOpen = false;
+        this.activeExplorerOverlay = null;
+        this.activePlayerOverlay = null;
         this.explorerOverlayGeneration = 0L;
         this.playerOverlayGeneration = 0L;
         this.lastPlayerEvent = null;
@@ -615,43 +622,57 @@ public final class FrigatePlugin implements KioskPlugin {
                 .touchable(true);
 
         host.showOverlay(OVERLAY_EXPLORER, spec, new OverlayFactory() {
-            private FrigateExplorerOverlay overlay;
-
             @Override
             public View create(Context context, KsTheme theme) {
-                overlay = new FrigateExplorerOverlay(
+                isExplorerOpen = true;
+                FrigateExplorerOverlay overlay = new FrigateExplorerOverlay(
                         context,
                         theme,
                         apiClient,
                         config,
                         imageLoader,
-                        () -> toggleExplorer(),
+                        () -> hideExplorerModal(),
                         event -> onEventSelected(event)
                 );
                 overlay.setPlayerStateProvider(() -> isPlayerOpen);
                 activeExplorerOverlay = overlay;
-                return overlay.buildView();
+                View root = overlay.buildView();
+                root.setTag(overlay);
+                return root;
+            }
+
+            @Override
+            public void onThemeChanged(View view, KsTheme theme) {
+                Object tag = (view != null) ? view.getTag() : null;
+                if (tag instanceof FrigateExplorerOverlay) {
+                    ((FrigateExplorerOverlay) tag).onThemeChanged(theme);
+                }
             }
 
             @Override
             public void onDestroy(View view) {
-                if (activeExplorerOverlay == overlay) {
-                    activeExplorerOverlay = null;
-                }
-                if (overlay != null) {
-                    overlay.onDestroy();
-                    overlay = null;
+                Object tag = (view != null) ? view.getTag() : null;
+                if (tag instanceof FrigateExplorerOverlay) {
+                    FrigateExplorerOverlay deadOverlay = (FrigateExplorerOverlay) tag;
+                    if (activeExplorerOverlay == deadOverlay) {
+                        activeExplorerOverlay = null;
+                        isExplorerOpen = false;
+                    }
+                    deadOverlay.onDestroy();
                 }
             }
         });
     }
 
-    private void hideExplorerModal() {
+    public synchronized void hideExplorerModal() {
         if (host == null) return;
         explorerOverlayGeneration++;
         host.hideOverlay(OVERLAY_EXPLORER);
         isExplorerOpen = false;
-        activeExplorerOverlay = null;
+        if (activeExplorerOverlay != null) {
+            activeExplorerOverlay.onDestroy();
+            activeExplorerOverlay = null;
+        }
     }
 
     /**
@@ -673,11 +694,10 @@ public final class FrigatePlugin implements KioskPlugin {
                 .touchable(true);
 
         host.showOverlay(OVERLAY_PLAYER, spec, new OverlayFactory() {
-            private FrigatePlayerOverlay player;
-
             @Override
             public View create(Context context, KsTheme theme) {
-                player = new FrigatePlayerOverlay(
+                isPlayerOpen = true;
+                FrigatePlayerOverlay player = new FrigatePlayerOverlay(
                         context,
                         theme,
                         host,
@@ -686,17 +706,32 @@ public final class FrigatePlugin implements KioskPlugin {
                         event,
                         () -> hidePlayerModal()
                 );
-                return player.buildView();
+                activePlayerOverlay = player;
+                View root = player.buildView();
+                root.setTag(player);
+                return root;
+            }
+
+            @Override
+            public void onThemeChanged(View view, KsTheme theme) {
+                Object tag = (view != null) ? view.getTag() : null;
+                if (tag instanceof FrigatePlayerOverlay) {
+                    ((FrigatePlayerOverlay) tag).onThemeChanged(theme);
+                }
             }
 
             @Override
             public void onDestroy(View view) {
-                if (player != null) {
-                    player.onDestroy();
-                    player = null;
+                Object tag = (view != null) ? view.getTag() : null;
+                if (tag instanceof FrigatePlayerOverlay) {
+                    FrigatePlayerOverlay deadPlayer = (FrigatePlayerOverlay) tag;
+                    if (activePlayerOverlay == deadPlayer) {
+                        activePlayerOverlay = null;
+                        isPlayerOpen = false;
+                    }
+                    deadPlayer.onDestroy();
                 }
-                isPlayerOpen = false;
-                if (activeExplorerOverlay != null) {
+                if (activeExplorerOverlay != null && !activeExplorerOverlay.isDestroyed()) {
                     activeExplorerOverlay.onResumeFromPlayer();
                 }
             }
@@ -711,7 +746,11 @@ public final class FrigatePlugin implements KioskPlugin {
         lastPlayerEvent = null;
         activeSelectCamera = SELECT_OPTION_CLOSED;
         publishCurrentCameraSelectState();
-        if (activeExplorerOverlay != null) {
+        if (activePlayerOverlay != null) {
+            activePlayerOverlay.onDestroy();
+            activePlayerOverlay = null;
+        }
+        if (activeExplorerOverlay != null && !activeExplorerOverlay.isDestroyed()) {
             activeExplorerOverlay.onResumeFromPlayer();
         }
     }

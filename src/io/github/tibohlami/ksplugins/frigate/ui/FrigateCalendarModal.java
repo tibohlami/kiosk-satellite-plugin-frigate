@@ -30,7 +30,7 @@ public class FrigateCalendarModal {
     }
 
     private final Context context;
-    private final KsTheme theme;
+    private KsTheme theme;
     private final FrigateConfig config;
     private final SimpleDateFormat dayKeyFmt;
 
@@ -43,13 +43,19 @@ public class FrigateCalendarModal {
         this.dayKeyFmt = dayKeyFmt;
     }
 
+    public void onThemeChanged(KsTheme newTheme) {
+        if (newTheme != null) {
+            this.theme = newTheme;
+        }
+    }
+
     private int s(float dp) {
-        float scale = (config != null) ? config.getUiScale() : 1.35f;
+        float scale = (config != null) ? config.getUiScale() : 1.0f;
         return Math.max(1, Math.round(theme.px(Math.round(dp * scale))));
     }
 
     private float sp(float sp) {
-        float scale = (config != null) ? config.getUiScale() : 1.35f;
+        float scale = (config != null) ? config.getUiScale() : 1.0f;
         return sp * scale;
     }
 
@@ -99,9 +105,9 @@ public class FrigateCalendarModal {
         LinearLayout card = new LinearLayout(context);
         card.setOrientation(LinearLayout.VERTICAL);
         GradientDrawable cardBg = new GradientDrawable();
-        cardBg.setColor(Color.parseColor("#0F172A"));
-        cardBg.setCornerRadius(s(16));
-        cardBg.setStroke(s(1), Color.parseColor("#334155"));
+        cardBg.setColor(FrigateTheme.surfaceContainer(theme));
+        cardBg.setCornerRadius(s(FrigateTheme.radiusCard(theme)));
+        cardBg.setStroke(s(1), FrigateTheme.outlineVariant(theme));
         card.setBackground(cardBg);
         card.setPadding(s(20), s(18), s(20), s(18));
         card.setClickable(true);
@@ -110,8 +116,8 @@ public class FrigateCalendarModal {
         TextView titleView = new TextView(context);
         titleView.setText(tr("browser_calendar_title"));
         titleView.setTextSize(sp(17));
-        titleView.setTextColor(Color.WHITE);
-        titleView.setTypeface(null, Typeface.BOLD);
+        titleView.setTextColor(FrigateTheme.onSurface(theme));
+        titleView.setTypeface(FrigateTheme.typeface(theme, 700));
         LinearLayout.LayoutParams tLp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         tLp.bottomMargin = s(12);
@@ -129,8 +135,8 @@ public class FrigateCalendarModal {
         final TextView monthLabel = new TextView(context);
         monthLabel.setGravity(Gravity.CENTER);
         monthLabel.setTextSize(sp(15));
-        monthLabel.setTextColor(Color.parseColor("#E2E8F0"));
-        monthLabel.setTypeface(null, Typeface.BOLD);
+        monthLabel.setTextColor(FrigateTheme.onSurface(theme));
+        monthLabel.setTypeface(FrigateTheme.typeface(theme, 600));
         TextView nextBtn = buildCalendarNavButton("\u203a");
 
         monthRow.addView(prevBtn, new LinearLayout.LayoutParams(s(42), s(38)));
@@ -151,8 +157,8 @@ public class FrigateCalendarModal {
             wtv.setText(wd);
             wtv.setGravity(Gravity.CENTER);
             wtv.setTextSize(sp(12));
-            wtv.setTextColor(Color.parseColor("#94A3B8"));
-            wtv.setTypeface(null, Typeface.BOLD);
+            wtv.setTextColor(FrigateTheme.onSurfaceVariant(theme));
+            wtv.setTypeface(FrigateTheme.typeface(theme, 600));
             weekRow.addView(wtv, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f));
         }
         LinearLayout.LayoutParams wrLp = new LinearLayout.LayoutParams(
@@ -211,14 +217,14 @@ public class FrigateCalendarModal {
                         cell.setGravity(Gravity.CENTER);
 
                         GradientDrawable cellBg = new GradientDrawable();
-                        cellBg.setCornerRadius(s(10));
+                        cellBg.setCornerRadius(s(FrigateTheme.radiusControl(theme)));
                         if (isSelected) {
-                            cellBg.setColor(Color.parseColor("#8B5CF6"));
+                            cellBg.setColor(FrigateTheme.primary(theme));
                         } else if (isToday) {
-                            cellBg.setColor(Color.parseColor("#1E293B"));
-                            cellBg.setStroke(s(1.5f), Color.parseColor("#38BDF8"));
+                            cellBg.setColor(FrigateTheme.surfaceContainerHigh(theme));
+                            cellBg.setStroke(s(1.5f), FrigateTheme.primary(theme));
                         } else if (!isFuture && evCount > 0 && inMonth) {
-                            cellBg.setColor(Color.parseColor("#1A2338"));
+                            cellBg.setColor(FrigateTheme.surfaceContainerHigh(theme));
                         } else {
                             cellBg.setColor(Color.TRANSPARENT);
                         }
@@ -229,22 +235,22 @@ public class FrigateCalendarModal {
                         numView.setGravity(Gravity.CENTER);
                         numView.setTextSize(sp(14));
                         if (isSelected) {
-                            numView.setTextColor(Color.WHITE);
-                            numView.setTypeface(null, Typeface.BOLD);
+                            numView.setTextColor(FrigateTheme.onPrimary(theme));
+                            numView.setTypeface(FrigateTheme.typeface(theme, 700));
                         } else if (isFuture) {
-                            numView.setTextColor(Color.parseColor("#334155"));
+                            numView.setTextColor(FrigateTheme.outline(theme));
                         } else if (!inMonth) {
-                            numView.setTextColor(Color.parseColor("#475569"));
+                            numView.setTextColor(FrigateTheme.outlineVariant(theme));
                         } else {
-                            numView.setTextColor(evCount > 0 ? Color.parseColor("#F8FAFC") : Color.parseColor("#94A3B8"));
-                            numView.setTypeface(null, evCount > 0 ? Typeface.BOLD : Typeface.NORMAL);
+                            numView.setTextColor(evCount > 0 ? FrigateTheme.onSurface(theme) : FrigateTheme.onSurfaceVariant(theme));
+                            numView.setTypeface(FrigateTheme.typeface(theme, evCount > 0 ? 600 : 400));
                         }
                         cell.addView(numView);
 
                         View dot = new View(context);
                         GradientDrawable dotBg = new GradientDrawable();
                         dotBg.setShape(GradientDrawable.OVAL);
-                        dotBg.setColor(isSelected ? Color.WHITE : Color.parseColor("#38BDF8"));
+                        dotBg.setColor(isSelected ? FrigateTheme.onPrimary(theme) : FrigateTheme.primary(theme));
                         dot.setBackground(dotBg);
                         dot.setVisibility((!isFuture && evCount > 0) ? View.VISIBLE : View.INVISIBLE);
                         LinearLayout.LayoutParams dotLp = new LinearLayout.LayoutParams(s(5), s(5));
@@ -296,7 +302,9 @@ public class FrigateCalendarModal {
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         arLp.topMargin = s(18);
 
-        TextView allDaysBtn = buildCalendarActionButton(tr("browser_calendar_all_days"), "#1E293B", "#334155", Color.parseColor("#CBD5E1"), false);
+        TextView allDaysBtn = buildCalendarActionButton(tr("browser_calendar_all_days"),
+                FrigateTheme.surfaceContainerHigh(theme), FrigateTheme.outlineVariant(theme),
+                FrigateTheme.onSurfaceVariant(theme), false);
         allDaysBtn.setOnClickListener(v -> {
             close(rootView);
             if (listener != null) listener.onDaySelected("all");
@@ -305,14 +313,18 @@ public class FrigateCalendarModal {
 
         actionsRow.addView(new View(context), new LinearLayout.LayoutParams(0, s(1), 1.0f));
 
-        TextView cancelBtn = buildCalendarActionButton(tr("common_cancel"), "#1E293B", "#334155", Color.parseColor("#E2E8F0"), false);
+        TextView cancelBtn = buildCalendarActionButton(tr("common_cancel"),
+                FrigateTheme.surfaceContainerHigh(theme), FrigateTheme.outlineVariant(theme),
+                FrigateTheme.onSurface(theme), false);
         LinearLayout.LayoutParams cancelLp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         cancelLp.rightMargin = s(16);
         cancelBtn.setOnClickListener(v -> close(rootView));
         actionsRow.addView(cancelBtn, cancelLp);
 
-        TextView okBtn = buildCalendarActionButton(tr("common_ok"), "#8B5CF6", "#8B5CF6", Color.WHITE, true);
+        TextView okBtn = buildCalendarActionButton(tr("common_ok"),
+                FrigateTheme.primary(theme), FrigateTheme.primary(theme),
+                FrigateTheme.onPrimary(theme), true);
         okBtn.setOnClickListener(v -> {
             String chosen = pendingDayRef[0];
             close(rootView);
@@ -343,29 +355,29 @@ public class FrigateCalendarModal {
         btn.setText(symbol);
         btn.setGravity(Gravity.CENTER);
         btn.setTextSize(sp(20));
-        btn.setTextColor(Color.parseColor("#E2E8F0"));
-        btn.setTypeface(null, Typeface.BOLD);
+        btn.setTextColor(FrigateTheme.onSurface(theme));
+        btn.setTypeface(FrigateTheme.typeface(theme, 700));
         GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Color.parseColor("#1E293B"));
-        bg.setCornerRadius(s(10));
-        bg.setStroke(s(1), Color.parseColor("#334155"));
+        bg.setColor(FrigateTheme.surfaceContainerHigh(theme));
+        bg.setCornerRadius(s(FrigateTheme.radiusControl(theme)));
+        bg.setStroke(s(1), FrigateTheme.outlineVariant(theme));
         btn.setBackground(bg);
         return btn;
     }
 
-    private TextView buildCalendarActionButton(String text, String fillHex, String strokeHex,
+    private TextView buildCalendarActionButton(String text, int fillColor, int strokeColor,
                                                int textColor, boolean bold) {
         TextView btn = new TextView(context);
         btn.setText(text);
         btn.setGravity(Gravity.CENTER);
         btn.setTextSize(sp(14));
         btn.setTextColor(textColor);
-        btn.setTypeface(null, bold ? Typeface.BOLD : Typeface.NORMAL);
+        btn.setTypeface(FrigateTheme.typeface(theme, bold ? 600 : 400));
         btn.setPadding(s(20), s(10), s(20), s(10));
         GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Color.parseColor(fillHex));
-        bg.setCornerRadius(s(10));
-        bg.setStroke(s(1), Color.parseColor(strokeHex));
+        bg.setColor(fillColor);
+        bg.setCornerRadius(s(FrigateTheme.radiusControl(theme)));
+        bg.setStroke(s(1), strokeColor);
         btn.setBackground(bg);
         return btn;
     }

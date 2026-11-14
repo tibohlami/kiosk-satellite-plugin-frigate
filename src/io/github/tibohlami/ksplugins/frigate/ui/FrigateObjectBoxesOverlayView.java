@@ -62,7 +62,7 @@ public class FrigateObjectBoxesOverlayView extends View {
     }
 
     private final float density;
-    private float uiScale = 1.35f;
+    private float uiScale = 1.0f;
     private FrigateConfig config;
 
     private final RectF videoRect = new RectF();
@@ -91,7 +91,7 @@ public class FrigateObjectBoxesOverlayView extends View {
     }
 
     public void setUiScale(float uiScale) {
-        this.uiScale = (uiScale >= 0.5f && uiScale <= 3.0f) ? uiScale : 1.35f;
+        this.uiScale = (uiScale >= 0.5f && uiScale <= 3.0f) ? uiScale : 1.0f;
         invalidate();
     }
 

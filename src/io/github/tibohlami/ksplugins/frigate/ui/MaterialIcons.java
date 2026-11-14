@@ -121,12 +121,18 @@ public final class MaterialIcons {
     }
 
     public static void setIconOnTextView(TextView view, String name, int color, int sizePx, int paddingPx, KsTheme theme) {
+        if (view == null) return;
         VectorDrawable d = getDrawable(name, color, sizePx, theme);
         if (d != null) {
             d.setBounds(0, 0, sizePx, sizePx);
             view.setCompoundDrawables(d, null, null, null);
             view.setCompoundDrawablePadding(paddingPx);
         }
+        view.setIncludeFontPadding(false);
+        int curGravity = view.getGravity();
+        int hGravity = (curGravity & android.view.Gravity.HORIZONTAL_GRAVITY_MASK);
+        if (hGravity == 0) hGravity = android.view.Gravity.START;
+        view.setGravity(hGravity | android.view.Gravity.CENTER_VERTICAL);
     }
 
     public static synchronized Path getPath(String name) {

@@ -84,7 +84,7 @@ Open **Settings > Plugin Manager > Frigate NVR Explorer > Settings** in Kiosk Sa
 | Setting | Key | Default | Description |
 | :--- | :--- | :--- | :--- |
 | **Language** | `language` | `Default` | UI language (`Default` uses the tablet's default locale). |
-| **UI Scale Factor** | `uiScaleFactor` | `1.35` | Interface scaling factor (`0.5`–`3.0`, step `0.05`) for wall-mounted tablets. |
+| **UI Scale Factor** | `uiScaleFactor` | `1.0` | Additional scaling multiplier (`0.5`–`3.0`, step `0.05`) applied on top of Kiosk Satellite's global UI scale. |
 | **Show stream transport badge** | `showStreamModePill` | `true` | Displays the active transport badge (`MSE`, `MJPEG`, `EXO`, `HLS`, `MP4`, `PREVIEW`) in the player header. |
 | **Show object bounding boxes by default** | `showObjectBoxesByDefault` | `false` | Enables object detection bounding boxes automatically in event and history playback. |
 | **Object box time offset (s)** | `bboxTimeOffsetSec` | `1.0` | Time shift in seconds (`-5.0` to `+5.0`, step `0.25`) to align bounding boxes with recorded video (typically `+1.0` to `+2.5` s depending on camera GOP and stream latency). |
