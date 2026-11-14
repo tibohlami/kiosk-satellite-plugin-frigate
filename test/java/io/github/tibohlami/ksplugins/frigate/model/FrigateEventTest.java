@@ -63,4 +63,15 @@ public class FrigateEventTest {
         assertEquals("alert", event.getSeverity());
         assertEquals(1, event.getZones().size());
     }
+
+    @Test
+    public void testWithSeverity() {
+        FrigateEvent event = new FrigateEvent("123", "cam1", "person", null, 0.85,
+                100.0, 120.0, true, true, null, null);
+        assertNull(event.getSeverity());
+        FrigateEvent enriched = event.withSeverity("alert");
+        assertEquals("alert", enriched.getSeverity());
+        assertEquals("123", enriched.getId());
+        assertEquals("person", enriched.getLabel());
+    }
 }

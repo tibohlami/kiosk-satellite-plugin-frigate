@@ -531,7 +531,7 @@ public class FrigateExplorerOverlay {
             statusTextView.setText(tr("explorer_loading_events"));
         }
 
-        apiClient.fetchEvents(null, null, 30, new FrigateApiClient.Callback<List<FrigateEvent>>() {
+        apiClient.fetchRecentEventsEnriched(30, new FrigateApiClient.Callback<List<FrigateEvent>>() {
             @Override
             public void onSuccess(List<FrigateEvent> events) {
                 mainHandler.post(() -> {
@@ -573,7 +573,8 @@ public class FrigateExplorerOverlay {
             if (!String.valueOf(a.getId()).equals(String.valueOf(b.getId()))
                     || Math.abs(a.getEndTime() - b.getEndTime()) > 0.01
                     || a.hasClip() != b.hasClip()
-                    || a.hasSnapshot() != b.hasSnapshot()) {
+                    || a.hasSnapshot() != b.hasSnapshot()
+                    || !String.valueOf(a.getSeverity()).equals(String.valueOf(b.getSeverity()))) {
                 return true;
             }
         }
