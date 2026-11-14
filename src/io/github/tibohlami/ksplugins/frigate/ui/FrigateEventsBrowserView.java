@@ -19,8 +19,10 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import me.jxl.kiosk.plugins.KsTheme;
+import me.jxl.kiosk.plugins.PluginHost;
 import io.github.tibohlami.ksplugins.frigate.api.FrigateApiClient;
 import io.github.tibohlami.ksplugins.frigate.api.FrigateEventsRepository;
+import io.github.tibohlami.ksplugins.frigate.api.FrigateHttpHelper;
 import io.github.tibohlami.ksplugins.frigate.config.FrigateConfig;
 import io.github.tibohlami.ksplugins.frigate.model.FrigateCamera;
 import io.github.tibohlami.ksplugins.frigate.model.FrigateEvent;
@@ -56,6 +58,7 @@ public class FrigateEventsBrowserView {
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final FrigateCalendarModal calendarModal;
     private final FrigateEventsRepository repository;
+    private final FrigatePreviewPlayerController previewController;
 
     private FrameLayout rootView;
     private LinearLayout mainContentLayout;
@@ -140,6 +143,7 @@ public class FrigateEventsBrowserView {
         this.config = config;
         this.imageLoader = imageLoader;
         this.eventClickListener = eventClickListener;
+        this.previewController = new FrigatePreviewPlayerController(context, config, apiClient);
         this.calendarModal = new FrigateCalendarModal(context, theme, config, dayKeyFmt);
         this.repository = new FrigateEventsRepository(apiClient, mainHandler,
                 new FrigateEventsRepository.Listener() {
@@ -331,6 +335,7 @@ public class FrigateEventsBrowserView {
             scrollThumbListener = null;
         }
         pendingThumbnails.clear();
+        previewController.release();
         repository.destroy();
         calendarModal.close(rootView);
         mainHandler.removeCallbacksAndMessages(null);
@@ -775,6 +780,9 @@ public class FrigateEventsBrowserView {
 
     private void reloadFromTop() {
         highlightedEventId = null;
+        if (previewController != null) {
+            previewController.detach();
+        }
 
         displayedEvents.clear();
         cardViewMap.clear();
@@ -1240,12 +1248,48 @@ public class FrigateEventsBrowserView {
         }
 
         card.setOnClickListener(v -> {
-            if (eventClickListener != null) {
-                eventClickListener.onEventClick(event);
+            if (config != null && config.isPreviewClipsOnSelection()) {
+                handleCardClickWithPreview(event, card);
+            } else {
+                if (eventClickListener != null) {
+                    eventClickListener.onEventClick(event);
+                }
             }
         });
 
         return card;
+    }
+
+    private void handleCardClickWithPreview(FrigateEvent event, FrameLayout card) {
+        if (event == null) return;
+        String evId = event.getId();
+
+        if (highlightedEventId != null && highlightedEventId.equals(evId) && previewController.isAttachedTo(card)) {
+            if (eventClickListener != null) {
+                eventClickListener.onEventClick(event);
+            }
+            return;
+        }
+
+        highlightedEventId = evId;
+        updateCardHighlights();
+
+        String clipUrl = repository.getEventPreviewClipUrl(event);
+        String clipPath = FrigateHttpHelper.getUrlPath(clipUrl);
+        PluginHost host = (config != null) ? config.getHost() : null;
+        FrigateHttpHelper.logDebug(host, config, "Frigate: [EventsBrowser] selected " + evId + " clip=" + clipPath);
+
+        if (clipUrl != null && !clipUrl.isEmpty()) {
+            previewController.attachTo(card, event, clipUrl);
+        } else {
+            previewController.detach();
+        }
+    }
+
+    public void detachPreview() {
+        if (previewController != null) {
+            previewController.detach();
+        }
     }
 
     private void checkAndLoadVisibleThumbnails() {

@@ -123,6 +123,37 @@ public class FrigateApiClient {
         return config.getFrigateUrl() + "/api/events/" + eventId + "/clip.mp4";
     }
 
+    public String getReviewPreviewUrl(String reviewId) {
+        if (reviewId == null || reviewId.trim().isEmpty()) return null;
+        return config.getFrigateUrl() + "/api/review/" + encodePath(reviewId.trim()) + "/preview?format=mp4";
+    }
+
+    public String getCameraPreviewMp4Url(String camera, long startSeconds, long endSeconds) {
+        if (camera == null || camera.trim().isEmpty()) return null;
+        return config.getFrigateUrl() + "/api/" + encodePath(camera.trim())
+                + "/start/" + startSeconds + "/end/" + endSeconds + "/preview.mp4";
+    }
+
+    public String getEventPreviewClipUrl(FrigateEvent event) {
+        if (event == null) return null;
+        String id = event.getId();
+        if (id != null && id.startsWith("rev:")) {
+            return getReviewPreviewUrl(id.substring(4));
+        }
+        String camera = event.getCamera();
+        if (camera != null && !camera.trim().isEmpty() && event.getStartTime() > 0) {
+            long start = (long) Math.floor(event.getStartTime());
+            long end = (event.getEndTime() > event.getStartTime())
+                    ? (long) Math.ceil(event.getEndTime())
+                    : (start + 15);
+            return getCameraPreviewMp4Url(camera, start, end);
+        }
+        if (id != null && !id.trim().isEmpty()) {
+            return getClipUrl(id);
+        }
+        return null;
+    }
+
     private static String encodePath(String segment) {
         if (segment == null) return "";
         try {

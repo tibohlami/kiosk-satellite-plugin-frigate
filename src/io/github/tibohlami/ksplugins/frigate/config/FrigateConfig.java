@@ -19,6 +19,7 @@ public class FrigateConfig {
     public static final String KEY_UI_SCALE = "uiScaleFactor";
     public static final String KEY_LEGACY_UI_SCALE = "uiScale";
     public static final String KEY_SHOW_STREAM_MODE_PILL = "showStreamModePill";
+    public static final String KEY_PREVIEW_CLIPS_ON_SELECTION = "previewClipsOnSelection";
     public static final String KEY_SHOW_OBJECT_BOXES_BY_DEFAULT = "showObjectBoxesByDefault";
     public static final String KEY_BBOX_TIME_OFFSET_SEC = "bboxTimeOffsetSec";
     public static final String KEY_ALLOW_INSECURE_SSL = "allowInsecureSsl";
@@ -30,6 +31,7 @@ public class FrigateConfig {
     public static final int DEFAULT_MAX_EVENTS = 25;
     public static final float DEFAULT_UI_SCALE = 1.0f;
     public static final boolean DEFAULT_SHOW_STREAM_MODE_PILL = true;
+    public static final boolean DEFAULT_PREVIEW_CLIPS_ON_SELECTION = true;
     public static final boolean DEFAULT_SHOW_OBJECT_BOXES_BY_DEFAULT = false;
     public static final double DEFAULT_BBOX_TIME_OFFSET_SEC = 1.0;
     public static final boolean DEFAULT_ALLOW_INSECURE_SSL = false;
@@ -165,6 +167,10 @@ public class FrigateConfig {
 
     public synchronized boolean isShowStreamModePill() {
         return getBooleanSetting(KEY_SHOW_STREAM_MODE_PILL, DEFAULT_SHOW_STREAM_MODE_PILL);
+    }
+
+    public synchronized boolean isPreviewClipsOnSelection() {
+        return getBooleanSetting(KEY_PREVIEW_CLIPS_ON_SELECTION, DEFAULT_PREVIEW_CLIPS_ON_SELECTION);
     }
 
     public synchronized boolean isShowObjectBoxesByDefault() {

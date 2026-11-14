@@ -97,6 +97,10 @@ public class FrigateEventsRepository {
         return apiClient.getThumbnailUrl(eventId);
     }
 
+    public String getEventPreviewClipUrl(FrigateEvent event) {
+        return apiClient.getEventPreviewClipUrl(event);
+    }
+
     public void fetchConfiguredLabels() {
         apiClient.fetchTrackedLabels(new FrigateApiClient.Callback<List<String>>() {
             @Override

@@ -17,13 +17,16 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import me.jxl.kiosk.plugins.KsTheme;
+import me.jxl.kiosk.plugins.PluginHost;
 import io.github.tibohlami.ksplugins.frigate.api.FrigateApiClient;
+import io.github.tibohlami.ksplugins.frigate.api.FrigateHttpHelper;
 import io.github.tibohlami.ksplugins.frigate.config.FrigateConfig;
 import io.github.tibohlami.ksplugins.frigate.model.FrigateCamera;
 import io.github.tibohlami.ksplugins.frigate.model.FrigateEvent;
 
 import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -83,6 +86,11 @@ public class FrigateExplorerOverlay {
 
     private boolean isEventsBrowserActive = false;
     private boolean eventsRefreshInFlight = false;
+
+    private final FrigatePreviewPlayerController recentPreviewController;
+    private final Map<String, View> recentHighlightMap = new HashMap<>();
+    private final Map<String, String> recentSeverityMap = new HashMap<>();
+    private String selectedRecentEventId = null;
     private int currentCameraCardHeight = 0;
     private final List<FrigateCamera> discoveredCameras = new ArrayList<>();
     private final List<FrigateEvent> loadedEvents = new ArrayList<>();
@@ -144,6 +152,7 @@ public class FrigateExplorerOverlay {
         this.imageLoader = imageLoader;
         this.onClose = onClose;
         this.eventClickListener = eventClickListener;
+        this.recentPreviewController = new FrigatePreviewPlayerController(context, config, apiClient);
         this.mainHandler = new Handler(Looper.getMainLooper());
     }
 
@@ -256,6 +265,9 @@ public class FrigateExplorerOverlay {
         mainHandler.removeCallbacks(stopRefreshSpinnerRunnable);
         stopRefreshSpinnerNow();
         cameraPreviewMap.clear();
+        recentPreviewController.release();
+        recentHighlightMap.clear();
+        recentSeverityMap.clear();
         if (eventsBrowser != null) {
             eventsBrowser.onDestroy();
         }
@@ -267,6 +279,9 @@ public class FrigateExplorerOverlay {
 
     private void showHomeView() {
         isEventsBrowserActive = false;
+        if (eventsBrowser != null) {
+            eventsBrowser.detachPreview();
+        }
         if (eventsBrowserRoot != null) {
             eventsBrowserRoot.setVisibility(View.GONE);
         }
@@ -282,6 +297,7 @@ public class FrigateExplorerOverlay {
     }
 
     private void openEventsBrowser(String initialCameraFilter) {
+        recentPreviewController.detach();
         isEventsBrowserActive = true;
         if (statusTextView != null) {
             statusTextView.setVisibility(View.GONE);
@@ -765,6 +781,10 @@ public class FrigateExplorerOverlay {
      * Renders the top horizontal scroll row of recent events cards (matching Frigate Web UI).
      */
     private void renderRecentEvents() {
+        recentPreviewController.detach();
+        recentHighlightMap.clear();
+        recentSeverityMap.clear();
+        selectedRecentEventId = null;
         recentEventsContainer.removeAllViews();
         eventsSectionTitle.setText(tr("section_last_events_count", loadedEvents.size()));
 
@@ -910,13 +930,74 @@ public class FrigateExplorerOverlay {
         bbLp.setMargins(m, 0, m, m);
         card.addView(bottomBar, bbLp);
 
+        // 4. Highlight border overlay
+        View highlightBorder = new View(context);
+        highlightBorder.setVisibility(View.GONE);
+        card.addView(highlightBorder, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+
+        if (event.getId() != null) {
+            recentHighlightMap.put(event.getId(), highlightBorder);
+            recentSeverityMap.put(event.getId(), severity);
+        }
+
         card.setOnClickListener(v -> {
-            if (eventClickListener != null) {
-                eventClickListener.onEventClick(event);
+            if (config != null && config.isPreviewClipsOnSelection()) {
+                handleRecentEventClickWithPreview(event, card);
+            } else {
+                if (eventClickListener != null) {
+                    eventClickListener.onEventClick(event);
+                }
             }
         });
 
         return card;
+    }
+
+    private void handleRecentEventClickWithPreview(FrigateEvent event, FrameLayout card) {
+        if (event == null) return;
+        String evId = event.getId();
+
+        if (selectedRecentEventId != null && selectedRecentEventId.equals(evId) && recentPreviewController.isAttachedTo(card)) {
+            if (eventClickListener != null) {
+                eventClickListener.onEventClick(event);
+            }
+            return;
+        }
+
+        selectedRecentEventId = evId;
+        updateRecentEventHighlights();
+
+        String clipUrl = apiClient.getEventPreviewClipUrl(event);
+        String clipPath = FrigateHttpHelper.getUrlPath(clipUrl);
+        PluginHost host = (config != null) ? config.getHost() : null;
+        FrigateHttpHelper.logDebug(host, config, "Frigate: [RecentEvents] selected " + evId + " clip=" + clipPath);
+
+        if (clipUrl != null && !clipUrl.isEmpty()) {
+            recentPreviewController.attachTo(card, event, clipUrl);
+        } else {
+            recentPreviewController.detach();
+        }
+    }
+
+    private void updateRecentEventHighlights() {
+        for (Map.Entry<String, View> entry : recentHighlightMap.entrySet()) {
+            String evId = entry.getKey();
+            View overlay = entry.getValue();
+            boolean isSelected = selectedRecentEventId != null && selectedRecentEventId.equals(evId);
+            if (!isSelected) {
+                overlay.setVisibility(View.GONE);
+                continue;
+            }
+            boolean isAlert = "alert".equalsIgnoreCase(recentSeverityMap.get(evId));
+            int accent = isAlert ? Color.parseColor("#F43F5E") : Color.parseColor("#F59E0B");
+            GradientDrawable hlBg = new GradientDrawable();
+            hlBg.setColor(Color.argb(38, Color.red(accent), Color.green(accent), Color.blue(accent)));
+            hlBg.setCornerRadius(s(FrigateTheme.radiusControl(theme)));
+            hlBg.setStroke(s(3), accent);
+            overlay.setBackground(hlBg);
+            overlay.setVisibility(View.VISIBLE);
+        }
     }
 
     /**

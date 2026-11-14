@@ -30,6 +30,9 @@
 -keepclasseswithmembers class io.github.tibohlami.ksplugins.frigate.shaded.androidx.media3.exoplayer.hls.HlsMediaSource$Factory {
   <init>(io.github.tibohlami.ksplugins.frigate.shaded.androidx.media3.datasource.DataSource$Factory);
 }
+-keepclasseswithmembers class io.github.tibohlami.ksplugins.frigate.shaded.androidx.media3.exoplayer.source.ProgressiveMediaSource$Factory {
+  <init>(io.github.tibohlami.ksplugins.frigate.shaded.androidx.media3.datasource.DataSource$Factory);
+}
 
 # Suppress warnings / notes for optional compile-only annotations and unused decoders/sources
 -dontnote io.github.tibohlami.ksplugins.frigate.shaded.androidx.media3.**

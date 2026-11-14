@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "kiosk-satellite-frigate",
   "name": "Frigate NVR Explorer",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "apiVersion": 1,
   "minAndroidSdk": 24,
   "minAppVersion": "2026.10.40",
@@ -96,6 +96,14 @@
       "title": "Show stream transport badge",
       "default": true,
       "description": "Display a small pill in the player header indicating the active stream mode (HLS, MP4, MSE, MJPEG)"
+    },
+    {
+      "key": "previewClipsOnSelection",
+      "group": "Interface",
+      "type": "boolean",
+      "title": "Preview clips on selection",
+      "default": true,
+      "description": "Play a short looping video preview when an event thumbnail is selected instead of opening the player immediately"
     },
     {
       "key": "showObjectBoxesByDefault",
