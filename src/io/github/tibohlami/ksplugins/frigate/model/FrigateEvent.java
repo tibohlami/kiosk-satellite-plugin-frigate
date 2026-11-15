@@ -283,27 +283,72 @@ public class FrigateEvent {
      * Material Design icon identifier matching any detection label string.
      */
     public static String getMaterialIconForLabel(String rawLabel) {
-        if (rawLabel == null) return io.github.tibohlami.ksplugins.frigate.ui.MaterialIcons.CAMERA;
-        switch (rawLabel.toLowerCase(Locale.ROOT)) {
+        if (rawLabel == null) return io.github.tibohlami.ksplugins.frigate.ui.MaterialIcons.TAG;
+        String norm = rawLabel.toLowerCase(Locale.ROOT);
+        if (norm.endsWith("-plate")) {
+            return io.github.tibohlami.ksplugins.frigate.ui.MaterialIcons.LICENSE_PLATE;
+        }
+        switch (norm) {
             case "person":
                 return io.github.tibohlami.ksplugins.frigate.ui.MaterialIcons.PERSON;
             case "car":
             case "vehicle":
-            case "truck":
-            case "motorcycle":
-            case "bus":
                 return io.github.tibohlami.ksplugins.frigate.ui.MaterialIcons.CAR;
-            case "dog":
+            case "motorcycle":
+                return io.github.tibohlami.ksplugins.frigate.ui.MaterialIcons.MOTORCYCLE;
+            case "bus":
+            case "school_bus":
+                return io.github.tibohlami.ksplugins.frigate.ui.MaterialIcons.BUS;
+            case "truck":
+            case "garbage_truck":
+                return io.github.tibohlami.ksplugins.frigate.ui.MaterialIcons.TRUCK;
+            case "bicycle":
+                return io.github.tibohlami.ksplugins.frigate.ui.MaterialIcons.BICYCLE;
+            case "boat":
+                return io.github.tibohlami.ksplugins.frigate.ui.MaterialIcons.BOAT;
             case "cat":
+                return io.github.tibohlami.ksplugins.frigate.ui.MaterialIcons.CAT;
+            case "dog":
+            case "bark":
+                return io.github.tibohlami.ksplugins.frigate.ui.MaterialIcons.DOG;
             case "bird":
+                return io.github.tibohlami.ksplugins.frigate.ui.MaterialIcons.BIRD;
+            case "horse":
+                return io.github.tibohlami.ksplugins.frigate.ui.MaterialIcons.HORSE;
+            case "cow":
+                return io.github.tibohlami.ksplugins.frigate.ui.MaterialIcons.COW;
+            case "rabbit":
+                return io.github.tibohlami.ksplugins.frigate.ui.MaterialIcons.RABBIT;
+            case "bear":
+                return io.github.tibohlami.ksplugins.frigate.ui.MaterialIcons.BEAR;
+            case "mouse":
+            case "rat":
+            case "squirrel":
+                return io.github.tibohlami.ksplugins.frigate.ui.MaterialIcons.MOUSE;
             case "animal":
+            case "deer":
+            case "fox":
+            case "goat":
+            case "kangaroo":
+            case "possum":
+            case "raccoon":
+            case "skunk":
+            case "sheep":
                 return io.github.tibohlami.ksplugins.frigate.ui.MaterialIcons.PETS;
             case "package":
                 return io.github.tibohlami.ksplugins.frigate.ui.MaterialIcons.PACKAGE;
-            case "bicycle":
-                return io.github.tibohlami.ksplugins.frigate.ui.MaterialIcons.BICYCLE;
+            case "license_plate":
+                return io.github.tibohlami.ksplugins.frigate.ui.MaterialIcons.LICENSE_PLATE;
+            case "baby":
+                return io.github.tibohlami.ksplugins.frigate.ui.MaterialIcons.BABY;
+            case "baby_stroller":
+                return io.github.tibohlami.ksplugins.frigate.ui.MaterialIcons.STROLLER;
+            case "umbrella":
+                return io.github.tibohlami.ksplugins.frigate.ui.MaterialIcons.UMBRELLA;
+            case "fire":
+                return io.github.tibohlami.ksplugins.frigate.ui.MaterialIcons.FIRE;
             default:
-                return io.github.tibohlami.ksplugins.frigate.ui.MaterialIcons.CAMERA;
+                return io.github.tibohlami.ksplugins.frigate.ui.MaterialIcons.TAG;
         }
     }
 
