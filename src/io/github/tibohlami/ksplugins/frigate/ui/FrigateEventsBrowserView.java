@@ -1142,26 +1142,34 @@ public class FrigateEventsBrowserView {
         badge.setBackground(bBg);
         badge.setPadding(s(7), s(3), s(7), s(3));
 
-        ImageView bIcon = MaterialIcons.createIconView(context, event.getMaterialIconName(), Color.WHITE, s(13), theme);
+        String iconName = event.getMaterialIconName();
+        boolean hasDedicatedIcon = !MaterialIcons.TAG.equals(iconName);
+        int score = (int) Math.round(event.getTopScore() * 100);
+        String labelText = hasDedicatedIcon
+                ? (score > 0 ? (score + "%") : "")
+                : (formatObjectLabel(event.getLabel()) + (score > 0 ? (" " + score + "%") : ""));
+
+        ImageView bIcon = MaterialIcons.createIconView(context, iconName, Color.WHITE, s(13), theme);
         LinearLayout.LayoutParams bIconLp = new LinearLayout.LayoutParams(s(13), s(13));
         bIconLp.gravity = Gravity.CENTER_VERTICAL;
-        bIconLp.rightMargin = s(4);
+        if (!labelText.isEmpty()) {
+            bIconLp.rightMargin = s(4);
+        }
         badge.addView(bIcon, bIconLp);
 
-        TextView bText = new TextView(context);
-        int score = (int) Math.round(event.getTopScore() * 100);
-        String labelDisplay = formatObjectLabel(event.getLabel());
-        if (score > 0) labelDisplay += " " + score + "%";
-        bText.setText(labelDisplay);
-        bText.setTextSize(sp(11));
-        bText.setTextColor(Color.WHITE);
-        bText.setTypeface(null, Typeface.BOLD);
-        bText.setIncludeFontPadding(false);
-        bText.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout.LayoutParams bTextLp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        bTextLp.gravity = Gravity.CENTER_VERTICAL;
-        badge.addView(bText, bTextLp);
+        if (!labelText.isEmpty()) {
+            TextView bText = new TextView(context);
+            bText.setText(labelText);
+            bText.setTextSize(sp(11));
+            bText.setTextColor(Color.WHITE);
+            bText.setTypeface(null, Typeface.BOLD);
+            bText.setIncludeFontPadding(false);
+            bText.setGravity(Gravity.CENTER_VERTICAL);
+            LinearLayout.LayoutParams bTextLp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            bTextLp.gravity = Gravity.CENTER_VERTICAL;
+            badge.addView(bText, bTextLp);
+        }
 
         FrameLayout.LayoutParams bLp = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
