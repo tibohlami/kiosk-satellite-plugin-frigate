@@ -92,7 +92,6 @@ public class FrigatePlayerOverlay {
     private int lastExoFrames = -1;
     private long lastExoFpsTsMs = 0L;
     private LinearLayout headerObjectsContainer;
-    private TextView headerTimeView;
     private ImageView playPauseBtn;
     private TextView timeCurrentText;
     private TextView timeDurationText;
@@ -100,7 +99,7 @@ public class FrigatePlayerOverlay {
     private TextView bboxBtn;
     private TextView loopBtn;
     private SeekBar seekBar;
-    private View transportSpacer;
+    private LinearLayout overlaySeekRow;
     private LinearLayout videoOverlayControls;
     private boolean videoOverlayVisible = true;
     private static final long OVERLAY_AUTO_HIDE_MS = 3000L;
@@ -799,17 +798,11 @@ public class FrigatePlayerOverlay {
         // 1. Header with title, badges, and close button
         card.addView(buildHeaderBar());
 
-        // 2. Main Row: Left Column (Video + Transport Bar below video) + Right Full-Height Vertical Timeline Scrubber
+        // 2. Main Row: Left Column (Full-Height Video) + Right Full-Height Vertical Timeline Scrubber
         LinearLayout mainRow = new LinearLayout(context);
         mainRow.setOrientation(LinearLayout.HORIZONTAL);
 
-        LinearLayout leftCol = new LinearLayout(context);
-        leftCol.setOrientation(LinearLayout.VERTICAL);
-        leftCol.addView(buildVideoFrame(), new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1.0f));
-        leftCol.addView(buildTransportBar(), new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-        mainRow.addView(leftCol, new LinearLayout.LayoutParams(
+        mainRow.addView(buildVideoFrame(), new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.MATCH_PARENT, 1.0f));
 
         LinearLayout.LayoutParams rulerPanelLp = new LinearLayout.LayoutParams(
@@ -854,11 +847,6 @@ public class FrigatePlayerOverlay {
             camBadge.setBackground(cbBg);
             camBadge.setTextColor(FrigateTheme.onSurface(theme));
             camBadge.setTypeface(FrigateTheme.typeface(theme, 600));
-        }
-        if (headerTimeView != null) {
-            headerTimeView.setTextColor(FrigateTheme.onSurfaceVariant(theme));
-            headerTimeView.setTypeface(FrigateTheme.typeface(theme, 500));
-            MaterialIcons.setIconOnTextView(headerTimeView, MaterialIcons.CALENDAR, FrigateTheme.onSurfaceVariant(theme), s(18), s(8), theme);
         }
         if (playerCloseBtn != null) {
             int closeErr = FrigateTheme.error(theme);
@@ -1039,20 +1027,50 @@ public class FrigatePlayerOverlay {
             updateObjectBadgesFromEvents(Collections.singletonList(event));
         }
 
-        // Event Timestamp / Live Status
-        headerTimeView = new TextView(context);
-        String formattedTime = isLiveStreamMode
-                ? tr("common_realtime_live")
-                : ((event != null && !event.getFormattedDateTime(context, config).isEmpty()) ? event.getFormattedDateTime(context, config) : getFormattedEventTime());
-        headerTimeView.setText(formattedTime);
-        headerTimeView.setTextSize(sp(14));
-        headerTimeView.setTextColor(FrigateTheme.onSurfaceVariant(theme));
-        headerTimeView.setTypeface(FrigateTheme.typeface(theme, 500));
-        MaterialIcons.setIconOnTextView(headerTimeView, MaterialIcons.CALENDAR, FrigateTheme.onSurfaceVariant(theme), s(18), s(8), theme);
-        LinearLayout.LayoutParams timeLp = new LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f);
-        timeLp.leftMargin = s(14);
-        header.addView(headerTimeView, timeLp);
+        // Flexible spacer pushing right-side action pills (Mute, Boxes, Close) to the end
+        View headerSpacer = new View(context);
+        header.addView(headerSpacer, new LinearLayout.LayoutParams(
+                0, 1, 1.0f));
+
+        // Mute / Unmute Audio Toggle Button (shown in Live MSE or VOD with audio)
+        muteBtn = new TextView(context);
+        muteBtn.setText(tr("player_sound_on"));
+        muteBtn.setGravity(Gravity.CENTER);
+        updateMuteButtonStyle();
+        muteBtn.setPadding(s(14), s(8), s(14), s(8));
+        muteBtn.setTextSize(sp(13));
+        muteBtn.setVisibility(View.GONE);
+        muteBtn.setOnClickListener(v -> {
+            isMuted = !isMuted;
+            updateMuteButtonStyle();
+            if (isExoPlayback && exoController.hasPlayer()) {
+                exoController.setMuted(isMuted);
+            } else if (webStreamController.hasWebView() && (isLiveMseActive || isHlsPlayback)) {
+                webStreamController.setMuted(isMuted);
+            }
+        });
+        LinearLayout.LayoutParams mLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        mLp.rightMargin = s(8);
+        header.addView(muteBtn, mLp);
+
+        // Object Bounding Boxes Toggle Button (shown in Historical / Event modes only)
+        bboxBtn = new TextView(context);
+        bboxBtn.setText(tr("player_boxes"));
+        bboxBtn.setGravity(Gravity.CENTER);
+        updateBboxButtonStyle();
+        bboxBtn.setPadding(s(14), s(8), s(14), s(8));
+        bboxBtn.setTextSize(sp(13));
+        updateBboxButtonVisibility();
+        bboxBtn.setOnClickListener(v -> {
+            showObjectBoxes = !showObjectBoxes;
+            updateBboxButtonStyle();
+            updateObjectBoxesOverlayVisibility();
+        });
+        LinearLayout.LayoutParams bbLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        bbLp.rightMargin = s(8);
+        header.addView(bboxBtn, bbLp);
 
         // Close Button with Material Close icon
         playerCloseBtn = new TextView(context);
@@ -1241,13 +1259,14 @@ public class FrigatePlayerOverlay {
         });
         videoContainer.addView(errorText);
 
-        // 7. Translucent auto-fading overlay transport controls (-10s, Play/Pause, +10s) over the video
+        // 7. Translucent auto-fading overlay transport controls (SeekBar, -10s, Play/Pause, +10s, Loop) over the video
         videoOverlayControls = buildVideoOverlayControls();
         FrameLayout.LayoutParams ovLp = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
         ovLp.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
-        ovLp.bottomMargin = s(20);
+        ovLp.bottomMargin = s(18);
         videoContainer.addView(videoOverlayControls, ovLp);
+        updateSeekBarVisibility();
         videoOverlayVisible = true;
         scheduleOverlayAutoHide();
 
@@ -1257,15 +1276,20 @@ public class FrigatePlayerOverlay {
     }
 
     private LinearLayout buildVideoOverlayControls() {
+        LinearLayout container = new LinearLayout(context);
+        container.setOrientation(LinearLayout.VERTICAL);
+        container.setGravity(Gravity.CENTER_HORIZONTAL);
+        GradientDrawable barBg = new GradientDrawable();
+        barBg.setColor(Color.argb(185, 11, 16, 26));
+        barBg.setCornerRadius(s(24));
+        barBg.setStroke(s(1), Color.argb(70, 255, 255, 255));
+        container.setBackground(barBg);
+        container.setPadding(s(16), s(10), s(16), s(10));
+
+        // Top row: -10s, Play/Pause, +10s, and Loop toggle (horizontally centered)
         LinearLayout bar = new LinearLayout(context);
         bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setGravity(Gravity.CENTER_VERTICAL);
-        GradientDrawable barBg = new GradientDrawable();
-        barBg.setColor(Color.argb(185, 11, 16, 26));
-        barBg.setCornerRadius(s(34));
-        barBg.setStroke(s(1), Color.argb(70, 255, 255, 255));
-        bar.setBackground(barBg);
-        bar.setPadding(s(12), s(8), s(12), s(8));
 
         // Rewind -10s Button
         TextView rewindBtn = new TextView(context);
@@ -1328,26 +1352,48 @@ public class FrigatePlayerOverlay {
         });
         bar.addView(forwardBtn);
 
-        return bar;
-    }
+        // Loop Toggle Button with Material Repeat vector icon (shown in Recorded Event mode)
+        loopBtn = new TextView(context);
+        loopBtn.setText(tr("player_loop"));
+        loopBtn.setGravity(Gravity.CENTER);
+        updateLoopButtonStyle();
+        loopBtn.setPadding(s(14), s(8), s(14), s(8));
+        loopBtn.setTextSize(sp(13));
+        updateLoopButtonVisibility();
+        loopBtn.setOnClickListener(v -> {
+            isLooping = !isLooping;
+            updateLoopButtonStyle();
+            boolean activeLoop = shouldLoopPlayback();
+            if (isExoPlayback && exoController.hasPlayer()) {
+                exoController.setLooping(activeLoop);
+            } else if (isHlsPlayback && webStreamController.hasWebView()) {
+                webStreamController.setVodLoop(activeLoop);
+            }
+            showVideoOverlayControls(true);
+        });
+        LinearLayout.LayoutParams loopLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        loopLp.leftMargin = s(12);
+        bar.addView(loopBtn, loopLp);
 
-    private View buildTransportBar() {
-        LinearLayout transport = new LinearLayout(context);
-        transport.setOrientation(LinearLayout.HORIZONTAL);
-        transport.setGravity(Gravity.CENTER_VERTICAL);
-        transport.setPadding(0, s(10), 0, s(2));
+        LinearLayout.LayoutParams barLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        barLp.gravity = Gravity.CENTER_HORIZONTAL;
+        container.addView(bar, barLp);
 
-        // Current Position Label
+        // Bottom row: SeekBar with current and total duration labels (Event mode)
+        overlaySeekRow = new LinearLayout(context);
+        overlaySeekRow.setOrientation(LinearLayout.HORIZONTAL);
+        overlaySeekRow.setGravity(Gravity.CENTER_VERTICAL);
+
         timeCurrentText = new TextView(context);
         timeCurrentText.setText(isLiveStreamMode ? tr("common_live") : "00:00");
-        timeCurrentText.setTextSize(sp(14));
-        timeCurrentText.setTextColor(FrigateTheme.onSurface(theme));
+        timeCurrentText.setTextSize(sp(13));
+        timeCurrentText.setTextColor(Color.WHITE);
         timeCurrentText.setTypeface(null, android.graphics.Typeface.BOLD);
-        int padH = s(12);
-        timeCurrentText.setPadding(0, 0, padH, 0);
-        transport.addView(timeCurrentText);
+        timeCurrentText.setPadding(0, 0, s(10), 0);
+        overlaySeekRow.addView(timeCurrentText);
 
-        // Playback Scrubber (SeekBar)
         seekBar = new SeekBar(context);
         theme.styleSlider(seekBar);
         int initialDurationMs = 0;
@@ -1373,6 +1419,7 @@ public class FrigatePlayerOverlay {
             public void onStartTrackingTouch(SeekBar sb) {
                 if (isLiveStreamMode) return;
                 isUserSeeking = true;
+                showVideoOverlayControls(false);
                 if (isExoPlayback && exoController.hasPlayer()) {
                     wasPlayingBeforeSeek = isPlaying;
                     exoController.setPlayWhenReady(false);
@@ -1399,85 +1446,24 @@ public class FrigatePlayerOverlay {
                     seekToSeconds(targetMs / 1000);
                 }
                 isUserSeeking = false;
+                scheduleOverlayAutoHide();
             }
         });
-        transport.addView(seekBar, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f));
+        overlaySeekRow.addView(seekBar, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f));
 
-        // Total Duration Label
         timeDurationText = new TextView(context);
         timeDurationText.setText(isLiveStreamMode ? tr("common_live") : (initialDurationMs > 0 ? formatDuration(initialDurationMs) : "00:00"));
-        timeDurationText.setTextSize(sp(14));
-        timeDurationText.setTextColor(FrigateTheme.onSurfaceVariant(theme));
-        timeDurationText.setPadding(padH, 0, padH, 0);
-        transport.addView(timeDurationText);
+        timeDurationText.setTextSize(sp(13));
+        timeDurationText.setTextColor(Color.argb(210, 226, 232, 240));
+        timeDurationText.setPadding(s(10), 0, 0, 0);
+        overlaySeekRow.addView(timeDurationText);
 
-        // Flex spacer shown in History or Live mode when horizontal seekBar/duration labels are hidden
-        transportSpacer = new View(context);
-        transportSpacer.setVisibility(View.GONE);
-        transport.addView(transportSpacer, new LinearLayout.LayoutParams(0, 1, 1.0f));
-        updateSeekBarVisibility();
+        LinearLayout.LayoutParams seekRowLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        seekRowLp.topMargin = s(8);
+        container.addView(overlaySeekRow, seekRowLp);
 
-        // Mute / Unmute Audio Toggle Button (shown in Live MSE or VOD with audio)
-        muteBtn = new TextView(context);
-        muteBtn.setText(tr("player_sound_on"));
-        muteBtn.setGravity(Gravity.CENTER);
-        updateMuteButtonStyle();
-        muteBtn.setPadding(s(14), s(10), s(14), s(10));
-        muteBtn.setTextSize(sp(13));
-        muteBtn.setVisibility(View.GONE);
-        muteBtn.setOnClickListener(v -> {
-            isMuted = !isMuted;
-            updateMuteButtonStyle();
-            if (isExoPlayback && exoController.hasPlayer()) {
-                exoController.setMuted(isMuted);
-            } else if (webStreamController.hasWebView() && (isLiveMseActive || isHlsPlayback)) {
-                webStreamController.setMuted(isMuted);
-            }
-        });
-        LinearLayout.LayoutParams mLp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        mLp.rightMargin = s(8);
-        transport.addView(muteBtn, mLp);
-
-        // Object Bounding Boxes Toggle Button (shown in Historical / Event modes only)
-        bboxBtn = new TextView(context);
-        bboxBtn.setText(tr("player_boxes"));
-        bboxBtn.setGravity(Gravity.CENTER);
-        updateBboxButtonStyle();
-        bboxBtn.setPadding(s(14), s(10), s(14), s(10));
-        bboxBtn.setTextSize(sp(13));
-        updateBboxButtonVisibility();
-        bboxBtn.setOnClickListener(v -> {
-            showObjectBoxes = !showObjectBoxes;
-            updateBboxButtonStyle();
-            updateObjectBoxesOverlayVisibility();
-        });
-        LinearLayout.LayoutParams bbLp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        bbLp.rightMargin = s(8);
-        transport.addView(bboxBtn, bbLp);
-
-        // Loop Toggle Button with Material Repeat vector icon (shown in Recorded mode)
-        loopBtn = new TextView(context);
-        loopBtn.setText(tr("player_loop"));
-        loopBtn.setGravity(Gravity.CENTER);
-        updateLoopButtonStyle();
-        loopBtn.setPadding(s(14), s(10), s(14), s(10));
-        loopBtn.setTextSize(sp(13));
-        updateLoopButtonVisibility();
-        loopBtn.setOnClickListener(v -> {
-            isLooping = !isLooping;
-            updateLoopButtonStyle();
-            boolean activeLoop = shouldLoopPlayback();
-            if (isExoPlayback && exoController.hasPlayer()) {
-                exoController.setLooping(activeLoop);
-            } else if (isHlsPlayback && webStreamController.hasWebView()) {
-                webStreamController.setVodLoop(activeLoop);
-            }
-        });
-        transport.addView(loopBtn);
-
-        return transport;
+        return container;
     }
 
     private void updateTransportModeBadge(String label, String textHex, String bgHex, String strokeHex) {
@@ -1725,7 +1711,23 @@ public class FrigatePlayerOverlay {
     }
 
     private void updateLoopButtonStyle() {
-        applyTogglePillStyle(loopBtn, isLooping, MaterialIcons.REPEAT);
+        if (loopBtn == null) return;
+        GradientDrawable bg = new GradientDrawable();
+        if (isLooping) {
+            bg.setColor(Color.parseColor("#2563EB"));
+            bg.setCornerRadius(s(20));
+            loopBtn.setBackground(bg);
+            loopBtn.setTextColor(Color.WHITE);
+            loopBtn.setTypeface(null, android.graphics.Typeface.BOLD);
+        } else {
+            bg.setColor(Color.argb(135, 30, 41, 59));
+            bg.setCornerRadius(s(20));
+            bg.setStroke(s(1), Color.argb(90, 148, 163, 184));
+            loopBtn.setBackground(bg);
+            loopBtn.setTextColor(Color.WHITE);
+            loopBtn.setTypeface(null, android.graphics.Typeface.NORMAL);
+        }
+        MaterialIcons.setIconOnTextView(loopBtn, MaterialIcons.REPEAT, Color.WHITE, s(18), s(6), theme);
     }
 
     private void updateBboxButtonStyle() {
@@ -1781,7 +1783,9 @@ public class FrigatePlayerOverlay {
     private void updateSeekBarVisibility() {
         boolean hideSeekBar = isLiveStreamMode || isHistoryMode;
         int barVisibility = hideSeekBar ? View.GONE : View.VISIBLE;
-        int spacerVisibility = hideSeekBar ? View.VISIBLE : View.GONE;
+        if (overlaySeekRow != null) {
+            overlaySeekRow.setVisibility(barVisibility);
+        }
         if (timeCurrentText != null) {
             timeCurrentText.setVisibility(barVisibility);
         }
@@ -1791,8 +1795,12 @@ public class FrigatePlayerOverlay {
         if (timeDurationText != null) {
             timeDurationText.setVisibility(barVisibility);
         }
-        if (transportSpacer != null) {
-            transportSpacer.setVisibility(spacerVisibility);
+        if (videoOverlayControls != null && videoOverlayControls.getLayoutParams() instanceof FrameLayout.LayoutParams) {
+            FrameLayout.LayoutParams ovLp = (FrameLayout.LayoutParams) videoOverlayControls.getLayoutParams();
+            ovLp.width = hideSeekBar ? FrameLayout.LayoutParams.WRAP_CONTENT : FrameLayout.LayoutParams.MATCH_PARENT;
+            ovLp.leftMargin = hideSeekBar ? 0 : s(24);
+            ovLp.rightMargin = hideSeekBar ? 0 : s(24);
+            videoOverlayControls.setLayoutParams(ovLp);
         }
     }
 
@@ -2087,9 +2095,6 @@ public class FrigatePlayerOverlay {
         timelineDurationSeconds = durationSec;
         eventTotalDurationMs = (int) (durationSec * 1000L);
 
-        if (headerTimeView != null) {
-            headerTimeView.setText(FrigateDateTimeUtils.formatWeekdayDateTime(context, config, targetEpoch * 1000L));
-        }
         if (timelineRuler != null) {
             timelineRuler.setCursorEpoch(targetEpoch, false);
         }
@@ -2245,9 +2250,6 @@ public class FrigatePlayerOverlay {
         timelineDurationSeconds = 0L;
         eventTotalDurationMs = 0;
 
-        if (headerTimeView != null) {
-            headerTimeView.setText(FrigateDateTimeUtils.formatWeekdayDateTime(context, config, epochSeconds * 1000L));
-        }
         if (timelineRuler != null) {
             timelineRuler.setCursorEpoch(epochSeconds, false);
         }
@@ -2344,9 +2346,6 @@ public class FrigatePlayerOverlay {
             scrubHudPill.setText(tr("player_scrub_preview", FrigateDateTimeUtils.formatTimeWithSeconds(context, config, epochMs)));
             scrubHudPill.setVisibility(View.VISIBLE);
         }
-        if (headerTimeView != null) {
-            headerTimeView.setText(FrigateDateTimeUtils.formatWeekdayDateTime(context, config, epochMs));
-        }
     }
 
     private void hideScrubPreview() {
@@ -2406,9 +2405,6 @@ public class FrigatePlayerOverlay {
         }
         updateObjectBadgesFromEvents(Collections.emptyList());
         startLiveObjectPoller();
-        if (headerTimeView != null) {
-            headerTimeView.setText(tr("common_realtime_live"));
-        }
         updateLoopButtonVisibility();
         updateBboxButtonVisibility();
         updateSeekBarVisibility();
@@ -2553,9 +2549,6 @@ public class FrigatePlayerOverlay {
         }
         if (timeDurationText != null) {
             timeDurationText.setText(formatDuration(eventTotalDurationMs));
-        }
-        if (headerTimeView != null) {
-            headerTimeView.setText(FrigateDateTimeUtils.formatWeekdayDateTime(context, config, startEpoch * 1000L));
         }
         if (timelineRuler != null) {
             timelineRuler.setCursorEpoch(startEpoch, false);
@@ -3127,9 +3120,6 @@ public class FrigatePlayerOverlay {
             }
             syncSelectedDayWithEpoch(wallEpoch);
             updateObjectBadgesForEpoch(wallEpoch);
-            if (isTimelineMode && headerTimeView != null) {
-                headerTimeView.setText(FrigateDateTimeUtils.formatWeekdayDateTime(context, config, wallEpoch * 1000L));
-            }
         }
         updateObjectBoxesForEpoch(wallEpochSeconds);
     }
