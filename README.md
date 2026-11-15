@@ -77,21 +77,34 @@ Open **Settings > Plugin Manager > Frigate NVR Explorer > Settings** in Kiosk Sa
 | **Frigate Password** | `password` | *(empty)* | Optional password used with `username` for `/api/login` session authentication. |
 | **Bearer Token / JWT** | `authToken` | *(empty)* | Optional manual Bearer token override (leave empty when using username/password or unauthenticated port `5000`). |
 | **Accept untrusted SSL certificates** | `allowInsecureSsl` | `false` | Allows self-signed or untrusted local HTTPS/WSS certificates (use only on trusted local networks). |
-| **Debug logging** | `debugLogging` | `false` | Enables verbose debug logging for plugin operations in Kiosk Satellite application log. |
 | **Test connection** *(button)* | `testConnection` | — | Verifies URL reachability, TLS validation, authentication, and `/api/config` camera access. |
 
-### Interface
+### General
 | Setting | Key | Default | Description |
 | :--- | :--- | :--- | :--- |
 | **Language** | `language` | `Default` | UI language (`Default` uses the tablet's default locale). |
 | **UI Scale Factor** | `uiScaleFactor` | `1.0` | Additional scaling multiplier (`0.5`–`3.0`, step `0.05`) applied on top of Kiosk Satellite's global UI scale. |
-| **Show stream transport badge** | `showStreamModePill` | `true` | Displays the active transport badge (`MSE`, `MJPEG`, `EXO`, `HLS`, `MP4`, `PREVIEW`) in the player header. |
-| **Preview clips on selection** | `previewClipsOnSelection` | `true` | Plays a short looping video preview when an event thumbnail is selected instead of opening the player immediately. |
+| **Debug logging** | `debugLogging` | `false` | Enables verbose debug logging for plugin operations in Kiosk Satellite application log. |
+| **Frigate Explorer** *(button)* | `openExplorer` | — | Opens the Frigate Explorer panel on the kiosk. |
+
+### Main screen
+| Setting | Key | Default | Description |
+| :--- | :--- | :--- | :--- |
 | **Highlight cameras with active events** | `highlightOngoingEvents` | `true` | Highlights camera cards with an alert border and badge when an event or detection is actively in progress. |
+| **Show latest events on main screen** | `showLatestEvents` | `true` | Displays the Latest Events horizontal strip above the cameras grid on the main screen. |
+
+### Events
+| Setting | Key | Default | Description |
+| :--- | :--- | :--- | :--- |
+| **Preview clips on selection** | `previewClipsOnSelection` | `true` | Plays a short looping video preview when an event thumbnail is selected instead of opening the player immediately. |
+
+### Fullscreen Player
+| Setting | Key | Default | Description |
+| :--- | :--- | :--- | :--- |
+| **Show stream transport badge** | `showStreamModePill` | `true` | Displays the active transport badge (`MSE`, `MJPEG`, `EXO`, `HLS`, `MP4`, `PREVIEW`) in the player header. |
 | **Show object bounding boxes by default** | `showObjectBoxesByDefault` | `false` | Enables object detection bounding boxes automatically in event and history playback. |
 | **Object box time offset (s)** | `bboxTimeOffsetSec` | `1.0` | Time shift in seconds (`-5.0` to `+5.0`, step `0.25`) to align bounding boxes with recorded video (typically `+1.0` to `+2.5` s depending on camera GOP and stream latency). |
 | **Mute audio by default** | `muteAudioByDefault` | `false` | Starts live streams and recorded clips muted when opening the player. |
-| **Frigate Explorer** *(button)* | `openExplorer` | — | Opens the Frigate Explorer panel on the kiosk. |
 
 ---
 

@@ -58,16 +58,8 @@
       "description": "Allow self-signed or invalid HTTPS certificates for local Frigate servers (e.g. port 8971). Enable only on trusted local networks."
     },
     {
-      "key": "debugLogging",
-      "group": "Connection",
-      "type": "boolean",
-      "title": "Debug logging",
-      "default": false,
-      "description": "Enable verbose debug logging for plugin operations in Kiosk Satellite application log"
-    },
-    {
       "key": "language",
-      "group": "Interface",
+      "group": "General",
       "type": "select",
       "title": "Language",
       "default": "Default",
@@ -80,7 +72,7 @@
     },
     {
       "key": "uiScaleFactor",
-      "group": "Interface",
+      "group": "General",
       "type": "number",
       "title": "UI Scale Factor",
       "min": 0.5,
@@ -90,32 +82,48 @@
       "description": "Additional scaling factor applied on top of Kiosk Satellite's global UI scale (default: 1.0). The Frigate UI automatically inherits the host UI scale; use this setting to adjust it further up or down."
     },
     {
-      "key": "showStreamModePill",
-      "group": "Interface",
+      "key": "debugLogging",
+      "group": "General",
       "type": "boolean",
-      "title": "Show stream transport badge",
-      "default": true,
-      "description": "Display a small pill in the player header indicating the active stream mode (HLS, MP4, MSE, MJPEG)"
-    },
-    {
-      "key": "previewClipsOnSelection",
-      "group": "Interface",
-      "type": "boolean",
-      "title": "Preview clips on selection",
-      "default": true,
-      "description": "Play a short looping video preview when an event thumbnail is selected instead of opening the player immediately"
+      "title": "Debug logging",
+      "default": false,
+      "description": "Enable verbose debug logging for plugin operations in Kiosk Satellite application log"
     },
     {
       "key": "highlightOngoingEvents",
-      "group": "Interface",
+      "group": "Main screen",
       "type": "boolean",
       "title": "Highlight cameras with active events",
       "default": true,
       "description": "Highlight camera cards with an alert border and badge when an event or detection is actively in progress"
     },
     {
+      "key": "showLatestEvents",
+      "group": "Main screen",
+      "type": "boolean",
+      "title": "Show latest events on main screen",
+      "default": true,
+      "description": "Display the Latest Events horizontal strip above the cameras grid on the main screen"
+    },
+    {
+      "key": "previewClipsOnSelection",
+      "group": "Events",
+      "type": "boolean",
+      "title": "Preview clips on selection",
+      "default": true,
+      "description": "Play a short looping video preview when an event thumbnail is selected instead of opening the player immediately"
+    },
+    {
+      "key": "showStreamModePill",
+      "group": "Fullscreen Player",
+      "type": "boolean",
+      "title": "Show stream transport badge",
+      "default": true,
+      "description": "Display a small pill in the player header indicating the active stream mode (HLS, MP4, MSE, MJPEG)"
+    },
+    {
       "key": "showObjectBoxesByDefault",
-      "group": "Interface",
+      "group": "Fullscreen Player",
       "type": "boolean",
       "title": "Show object bounding boxes by default",
       "default": false,
@@ -123,7 +131,7 @@
     },
     {
       "key": "bboxTimeOffsetSec",
-      "group": "Interface",
+      "group": "Fullscreen Player",
       "type": "number",
       "title": "Object box time offset (s)",
       "min": -5.0,
@@ -134,7 +142,7 @@
     },
     {
       "key": "muteAudioByDefault",
-      "group": "Interface",
+      "group": "Fullscreen Player",
       "type": "boolean",
       "title": "Mute audio by default",
       "default": false,
@@ -151,7 +159,7 @@
     },
     {
       "id": "openExplorer",
-      "group": "Interface",
+      "group": "General",
       "title": "Frigate Explorer",
       "label": "Open",
       "description": "Show the Frigate Explorer panel on the kiosk."
