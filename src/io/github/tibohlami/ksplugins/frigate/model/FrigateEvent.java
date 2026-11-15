@@ -135,27 +135,29 @@ public class FrigateEvent {
         boolean hasClip = json.optBoolean("has_clip", true);
         boolean hasSnapshot = json.optBoolean("has_snapshot", true);
 
-        // Zones
+        // Zones: collect from zones, current_zones, and entered_zones (both root and inside data)
         List<String> zones = new ArrayList<>();
-        JSONArray zonesArray = json.optJSONArray("zones");
-        if (zonesArray == null && json.has("data")) {
-            JSONObject data = json.optJSONObject("data");
-            if (data != null) {
-                zonesArray = data.optJSONArray("zones");
-            }
-        }
-        if (zonesArray != null) {
-            for (int i = 0; i < zonesArray.length(); i++) {
-                zones.add(zonesArray.optString(i));
-            }
+        collectZones(json.optJSONArray("zones"), zones);
+        collectZones(json.optJSONArray("current_zones"), zones);
+        collectZones(json.optJSONArray("entered_zones"), zones);
+        JSONObject dataObj = json.optJSONObject("data");
+        if (dataObj != null) {
+            collectZones(dataObj.optJSONArray("zones"), zones);
+            collectZones(dataObj.optJSONArray("current_zones"), zones);
+            collectZones(dataObj.optJSONArray("entered_zones"), zones);
         }
 
         String severity = json.optString("severity", null);
+        if (severity == null && dataObj != null) {
+            severity = dataObj.optString("severity", null);
+        }
+        if (severity == null || severity.trim().isEmpty()) {
+            severity = (!zones.isEmpty()) ? "alert" : "detection";
+        }
 
         float[] snapshotBox = null;
         double snapshotFrameTime = 0.0;
         List<PathPoint> pathData = null;
-        JSONObject dataObj = json.optJSONObject("data");
         if (dataObj != null) {
             JSONArray boxArr = dataObj.optJSONArray("box");
             if (boxArr != null && boxArr.length() == 4) {
@@ -340,5 +342,15 @@ public class FrigateEvent {
         }
 
         return FrigateDateTimeUtils.formatDayMonthTime(context, config, epochMs);
+    }
+
+    private static void collectZones(JSONArray array, List<String> target) {
+        if (array == null) return;
+        for (int i = 0; i < array.length(); i++) {
+            String z = array.optString(i, null);
+            if (z != null && !z.trim().isEmpty() && !target.contains(z.trim())) {
+                target.add(z.trim());
+            }
+        }
     }
 }

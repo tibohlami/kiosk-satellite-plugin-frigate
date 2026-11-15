@@ -106,6 +106,14 @@
       "description": "Play a short looping video preview when an event thumbnail is selected instead of opening the player immediately"
     },
     {
+      "key": "highlightOngoingEvents",
+      "group": "Interface",
+      "type": "boolean",
+      "title": "Highlight cameras with active events",
+      "default": true,
+      "description": "Highlight camera cards with an alert border and badge when an event or detection is actively in progress"
+    },
+    {
       "key": "showObjectBoxesByDefault",
       "group": "Interface",
       "type": "boolean",

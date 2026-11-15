@@ -486,15 +486,79 @@ public class FrigateApiClient {
     }
 
     /**
-     * Fetches currently active (in-progress) object detections on a camera.
+     * Fetches currently active (in-progress) object detections on a specific camera,
+     * or across all cameras if camera is null or empty.
      */
     public void fetchInProgressEvents(String camera, Callback<List<FrigateEvent>> callback) {
-        if (isShutdown || executor.isShutdown() || camera == null || camera.trim().isEmpty()) return;
+        if (isShutdown || executor.isShutdown()) return;
         try {
-            String url = config.getFrigateUrl()
-                    + "/api/events?camera=" + URLEncoder.encode(camera.trim(), "UTF-8")
-                    + "&in_progress=1&limit=20";
-            fetchEventsInternal(url, callback);
+            StringBuilder url = new StringBuilder(config.getFrigateUrl())
+                    .append("/api/events?in_progress=1&limit=50");
+            if (camera != null && !camera.trim().isEmpty()) {
+                url.append("&camera=").append(URLEncoder.encode(camera.trim(), "UTF-8"));
+            }
+            fetchEventsInternal(url.toString(), new Callback<List<FrigateEvent>>() {
+                @Override
+                public void onSuccess(List<FrigateEvent> events) {
+                    if (isShutdown) return;
+                    if (events == null || events.isEmpty()) {
+                        callback.onSuccess(Collections.emptyList());
+                        return;
+                    }
+                    fetchReviewSegmentsFiltered(camera, null, null, 0L, 0L, 25, new Callback<List<ReviewSegment>>() {
+                        @Override
+                        public void onSuccess(List<ReviewSegment> reviews) {
+                            if (isShutdown) return;
+                            if (reviews == null || reviews.isEmpty()) {
+                                callback.onSuccess(events);
+                                return;
+                            }
+                            Map<String, String> detSeverityMap = new HashMap<>();
+                            Map<String, String> ongoingCamSeverityMap = new HashMap<>();
+                            double nowSec = System.currentTimeMillis() / 1000.0;
+                            for (ReviewSegment rev : reviews) {
+                                if (rev.detectionIds != null) {
+                                    for (String detId : rev.detectionIds) {
+                                        String existing = detSeverityMap.get(detId);
+                                        if (!"alert".equals(existing)) {
+                                            detSeverityMap.put(detId, rev.severity);
+                                        }
+                                    }
+                                }
+                                if (rev.camera != null && Math.abs(nowSec - rev.startTime) < 120.0) {
+                                    String existing = ongoingCamSeverityMap.get(rev.camera);
+                                    if (!"alert".equals(existing)) {
+                                        ongoingCamSeverityMap.put(rev.camera, rev.severity);
+                                    }
+                                }
+                            }
+                            List<FrigateEvent> enriched = new ArrayList<>(events.size());
+                            for (FrigateEvent ev : events) {
+                                String sev = detSeverityMap.get(ev.getId());
+                                if (sev == null && "alert".equalsIgnoreCase(ongoingCamSeverityMap.get(ev.getCamera()))) {
+                                    sev = "alert";
+                                }
+                                if (sev == null) {
+                                    sev = ev.getSeverity();
+                                }
+                                enriched.add(ev.withSeverity(sev != null ? sev : "detection"));
+                            }
+                            callback.onSuccess(enriched);
+                        }
+
+                        @Override
+                        public void onError(Exception e) {
+                            if (isShutdown) return;
+                            callback.onSuccess(events);
+                        }
+                    });
+                }
+
+                @Override
+                public void onError(Exception e) {
+                    if (!isShutdown) callback.onError(e);
+                }
+            });
         } catch (Exception e) {
             if (!isShutdown) callback.onError(e);
         }

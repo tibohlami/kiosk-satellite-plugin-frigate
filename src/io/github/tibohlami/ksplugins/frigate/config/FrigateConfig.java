@@ -20,6 +20,7 @@ public class FrigateConfig {
     public static final String KEY_LEGACY_UI_SCALE = "uiScale";
     public static final String KEY_SHOW_STREAM_MODE_PILL = "showStreamModePill";
     public static final String KEY_PREVIEW_CLIPS_ON_SELECTION = "previewClipsOnSelection";
+    public static final String KEY_HIGHLIGHT_ONGOING_EVENTS = "highlightOngoingEvents";
     public static final String KEY_SHOW_OBJECT_BOXES_BY_DEFAULT = "showObjectBoxesByDefault";
     public static final String KEY_BBOX_TIME_OFFSET_SEC = "bboxTimeOffsetSec";
     public static final String KEY_ALLOW_INSECURE_SSL = "allowInsecureSsl";
@@ -32,6 +33,7 @@ public class FrigateConfig {
     public static final float DEFAULT_UI_SCALE = 1.0f;
     public static final boolean DEFAULT_SHOW_STREAM_MODE_PILL = true;
     public static final boolean DEFAULT_PREVIEW_CLIPS_ON_SELECTION = true;
+    public static final boolean DEFAULT_HIGHLIGHT_ONGOING_EVENTS = true;
     public static final boolean DEFAULT_SHOW_OBJECT_BOXES_BY_DEFAULT = false;
     public static final double DEFAULT_BBOX_TIME_OFFSET_SEC = 1.0;
     public static final boolean DEFAULT_ALLOW_INSECURE_SSL = false;
@@ -171,6 +173,10 @@ public class FrigateConfig {
 
     public synchronized boolean isPreviewClipsOnSelection() {
         return getBooleanSetting(KEY_PREVIEW_CLIPS_ON_SELECTION, DEFAULT_PREVIEW_CLIPS_ON_SELECTION);
+    }
+
+    public synchronized boolean isHighlightOngoingEvents() {
+        return getBooleanSetting(KEY_HIGHLIGHT_ONGOING_EVENTS, DEFAULT_HIGHLIGHT_ONGOING_EVENTS);
     }
 
     public synchronized boolean isShowObjectBoxesByDefault() {

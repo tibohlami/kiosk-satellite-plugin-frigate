@@ -26,6 +26,7 @@ import io.github.tibohlami.ksplugins.frigate.model.FrigateEvent;
 
 import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -95,6 +96,9 @@ public class FrigateExplorerOverlay {
     private final List<FrigateCamera> discoveredCameras = new ArrayList<>();
     private final List<FrigateEvent> loadedEvents = new ArrayList<>();
     private final Map<String, ImageView> cameraPreviewMap = new LinkedHashMap<>();
+    private final Map<String, View> cameraHighlightMap = new HashMap<>();
+    private final Map<String, LinearLayout> cameraBadgeMap = new HashMap<>();
+    private boolean ongoingPollInFlight = false;
     private volatile boolean isDestroyed = false;
 
     public boolean isOverlayVisible() {
@@ -114,6 +118,7 @@ public class FrigateExplorerOverlay {
         if (isDestroyed || !isOverlayVisible()) return;
         refreshAllCameraSnapshots();
         loadEvents(true);
+        pollOngoingEvents();
     }
 
     private final Runnable snapshotRefreshTask = new Runnable() {
@@ -122,6 +127,7 @@ public class FrigateExplorerOverlay {
             if (isDestroyed) return;
             if (isOverlayVisible() && !isEventsBrowserActive) {
                 refreshAllCameraSnapshots();
+                pollOngoingEvents();
             }
             mainHandler.postDelayed(this, 3000);
         }
@@ -265,6 +271,8 @@ public class FrigateExplorerOverlay {
         mainHandler.removeCallbacks(stopRefreshSpinnerRunnable);
         stopRefreshSpinnerNow();
         cameraPreviewMap.clear();
+        cameraHighlightMap.clear();
+        cameraBadgeMap.clear();
         recentPreviewController.release();
         recentHighlightMap.clear();
         recentSeverityMap.clear();
@@ -290,6 +298,8 @@ public class FrigateExplorerOverlay {
         }
         updateHeaderTabSelection();
         loadEvents(true);
+        refreshAllCameraSnapshots();
+        pollOngoingEvents();
     }
 
     private void openEventsBrowser() {
@@ -1006,6 +1016,8 @@ public class FrigateExplorerOverlay {
     private void renderCamerasGrid() {
         camerasGridContainer.removeAllViews();
         cameraPreviewMap.clear();
+        cameraHighlightMap.clear();
+        cameraBadgeMap.clear();
         camerasSectionTitle.setText(tr("section_cameras_count", discoveredCameras.size()));
 
         if (discoveredCameras.isEmpty()) {
@@ -1063,6 +1075,7 @@ public class FrigateExplorerOverlay {
         }
 
         camerasGridContainer.post(this::adjustCameraGridHeightIfNeeded);
+        pollOngoingEvents();
     }
 
     private int getMeasuredAvailableCameraGridHeight() {
@@ -1159,7 +1172,29 @@ public class FrigateExplorerOverlay {
         cameraPreviewMap.put(camera.getName(), camPreview);
         imageLoader.loadFresh(apiClient.getLatestFrameUrl(camera.getName()) + "?t=" + System.currentTimeMillis(), camPreview);
 
-        // 2. Camera Name Pill on Bottom-Left with Material Camera icon
+        // 2. Highlight border overlay (3dp outline matching Frigate's LivePlayer.tsx)
+        View highlightBorder = new View(context);
+        highlightBorder.setVisibility(View.GONE);
+        card.addView(highlightBorder, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        cameraHighlightMap.put(camera.getName(), highlightBorder);
+
+        // 3. Activity pills row on Top-Right (supports multiple ongoing detected objects)
+        LinearLayout activityBadgeRow = new LinearLayout(context);
+        activityBadgeRow.setOrientation(LinearLayout.HORIZONTAL);
+        activityBadgeRow.setGravity(Gravity.CENTER_VERTICAL);
+        activityBadgeRow.setVisibility(View.GONE);
+
+        FrameLayout.LayoutParams badgeLp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
+        badgeLp.gravity = Gravity.TOP | Gravity.RIGHT;
+        int margin = s(12);
+        badgeLp.setMargins(0, margin, margin, 0);
+        card.addView(activityBadgeRow, badgeLp);
+
+        cameraBadgeMap.put(camera.getName(), activityBadgeRow);
+
+        // 4. Camera Name Pill on Bottom-Left with Material Camera icon
         LinearLayout nameBadge = new LinearLayout(context);
         nameBadge.setOrientation(LinearLayout.HORIZONTAL);
         nameBadge.setGravity(Gravity.CENTER_VERTICAL);
@@ -1190,8 +1225,7 @@ public class FrigateExplorerOverlay {
         FrameLayout.LayoutParams nbLp = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
         nbLp.gravity = Gravity.BOTTOM | Gravity.LEFT;
-        int m = s(12);
-        nbLp.setMargins(m, 0, 0, m);
+        nbLp.setMargins(margin, 0, 0, margin);
         card.addView(nameBadge, nbLp);
 
         // 3. Action Buttons on Bottom-Right with Material Movie & Play icons
@@ -1268,7 +1302,7 @@ public class FrigateExplorerOverlay {
         FrameLayout.LayoutParams actLp = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
         actLp.gravity = Gravity.BOTTOM | Gravity.RIGHT;
-        actLp.setMargins(0, 0, m, m);
+        actLp.setMargins(0, 0, margin, margin);
         card.addView(actionsRow, actLp);
 
         card.setOnClickListener(v -> openLivePlayer(camera.getName()));
@@ -1289,6 +1323,165 @@ public class FrigateExplorerOverlay {
                     null, cameraName, "Live", null, 1.0,
                     0, 0, true, true, null, null);
             eventClickListener.onEventClick(liveCamEvent);
+        }
+    }
+
+    private void pollOngoingEvents() {
+        if (ongoingPollInFlight || isDestroyed || !isOverlayVisible() || isEventsBrowserActive) return;
+        if (config != null && !config.isHighlightOngoingEvents()) {
+            clearCameraHighlights();
+            return;
+        }
+        ongoingPollInFlight = true;
+        apiClient.fetchInProgressEvents(null, new FrigateApiClient.Callback<List<FrigateEvent>>() {
+            @Override
+            public void onSuccess(List<FrigateEvent> events) {
+                mainHandler.post(() -> {
+                    ongoingPollInFlight = false;
+                    if (isDestroyed || !isOverlayVisible() || isEventsBrowserActive) return;
+                    applyOngoingEvents(events);
+                });
+            }
+
+            @Override
+            public void onError(Exception e) {
+                mainHandler.post(() -> {
+                    ongoingPollInFlight = false;
+                });
+            }
+        });
+    }
+
+    private void applyOngoingEvents(List<FrigateEvent> ongoingEvents) {
+        if (isDestroyed || cameraHighlightMap.isEmpty()) return;
+
+        boolean enabled = config == null || config.isHighlightOngoingEvents();
+        if (!enabled || ongoingEvents == null || ongoingEvents.isEmpty()) {
+            clearCameraHighlights();
+            return;
+        }
+
+        Map<String, List<FrigateEvent>> activeByCam = new HashMap<>();
+        for (FrigateEvent ev : ongoingEvents) {
+            if (ev == null || ev.getCamera() == null) continue;
+            String cam = ev.getCamera();
+            List<FrigateEvent> list = activeByCam.get(cam);
+            if (list == null) {
+                list = new ArrayList<>();
+                activeByCam.put(cam, list);
+            }
+            list.add(ev);
+        }
+
+        for (Map.Entry<String, View> entry : cameraHighlightMap.entrySet()) {
+            String camName = entry.getKey();
+            View highlightView = entry.getValue();
+            LinearLayout badgeRow = cameraBadgeMap.get(camName);
+
+            List<FrigateEvent> camEvents = activeByCam.get(camName);
+            if (camEvents == null || camEvents.isEmpty()) {
+                if (highlightView != null && highlightView.getVisibility() != View.GONE) {
+                    highlightView.setVisibility(View.GONE);
+                }
+                if (badgeRow != null) {
+                    if (badgeRow.getVisibility() != View.GONE) badgeRow.setVisibility(View.GONE);
+                    badgeRow.removeAllViews();
+                }
+                continue;
+            }
+
+            // Overall camera alert vs detection border
+            boolean hasAlert = false;
+            for (FrigateEvent ev : camEvents) {
+                if ("alert".equalsIgnoreCase(ev.getSeverity())) {
+                    hasAlert = true;
+                    break;
+                }
+            }
+            int borderAccent = hasAlert ? Color.parseColor("#F43F5E") : Color.parseColor("#F59E0B");
+
+            if (highlightView != null) {
+                GradientDrawable hlBg = new GradientDrawable();
+                hlBg.setColor(Color.argb(35, Color.red(borderAccent), Color.green(borderAccent), Color.blue(borderAccent)));
+                hlBg.setCornerRadius(s(FrigateTheme.radiusRow(theme)));
+                hlBg.setStroke(s(3), borderAccent);
+                highlightView.setBackground(hlBg);
+                highlightView.setVisibility(View.VISIBLE);
+            }
+
+            if (badgeRow != null) {
+                // Group by object label, retaining highest severity per label
+                Map<String, String> severityByLabel = new LinkedHashMap<>();
+                for (FrigateEvent ev : camEvents) {
+                    String label = ev.getLabel();
+                    if (label == null || label.trim().isEmpty()) label = "motion";
+                    label = label.toLowerCase(Locale.ROOT);
+                    String existing = severityByLabel.get(label);
+                    if (existing == null || ("alert".equalsIgnoreCase(ev.getSeverity()) && !"alert".equalsIgnoreCase(existing))) {
+                        severityByLabel.put(label, ev.getSeverity());
+                    }
+                }
+
+                // Sort: alert labels first, then detections
+                List<Map.Entry<String, String>> sortedEntries = new ArrayList<>(severityByLabel.entrySet());
+                Collections.sort(sortedEntries, (a, b) -> {
+                    boolean aAlert = "alert".equalsIgnoreCase(a.getValue());
+                    boolean bAlert = "alert".equalsIgnoreCase(b.getValue());
+                    if (aAlert != bAlert) return aAlert ? -1 : 1;
+                    return 0;
+                });
+
+                badgeRow.removeAllViews();
+                int shown = 0;
+                for (Map.Entry<String, String> item : sortedEntries) {
+                    if (shown >= 3) break;
+                    String label = item.getKey();
+                    boolean isAlert = "alert".equalsIgnoreCase(item.getValue());
+                    int pillAccent = isAlert ? Color.parseColor("#F43F5E") : Color.parseColor("#F59E0B");
+
+                    FrameLayout pill = new FrameLayout(context);
+                    pill.setPadding(s(8), s(6), s(8), s(6));
+
+                    GradientDrawable pillBg = new GradientDrawable();
+                    int bgTint = Color.argb(230,
+                            (int) (15 * 0.65 + Color.red(pillAccent) * 0.35),
+                            (int) (23 * 0.65 + Color.green(pillAccent) * 0.35),
+                            (int) (42 * 0.65 + Color.blue(pillAccent) * 0.35));
+                    pillBg.setColor(bgTint);
+                    pillBg.setCornerRadius(s(FrigateTheme.radiusControl(theme)));
+                    pillBg.setStroke(s(1.5f), pillAccent);
+                    pill.setBackground(pillBg);
+
+                    String iconName = FrigateEvent.getMaterialIconForLabel(label);
+                    ImageView iconView = new ImageView(context);
+                    iconView.setImageDrawable(MaterialIcons.getDrawable(iconName, pillAccent, s(18), theme));
+                    iconView.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+                    pill.addView(iconView, new FrameLayout.LayoutParams(s(18), s(18), Gravity.CENTER));
+
+                    LinearLayout.LayoutParams pLp = new LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                    if (shown > 0) {
+                        pLp.leftMargin = s(6);
+                    }
+                    badgeRow.addView(pill, pLp);
+                    shown++;
+                }
+                badgeRow.setVisibility(View.VISIBLE);
+            }
+        }
+    }
+
+    private void clearCameraHighlights() {
+        for (View v : cameraHighlightMap.values()) {
+            if (v != null && v.getVisibility() != View.GONE) {
+                v.setVisibility(View.GONE);
+            }
+        }
+        for (LinearLayout v : cameraBadgeMap.values()) {
+            if (v != null) {
+                if (v.getVisibility() != View.GONE) v.setVisibility(View.GONE);
+                v.removeAllViews();
+            }
         }
     }
 

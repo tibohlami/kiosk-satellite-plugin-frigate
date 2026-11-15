@@ -87,6 +87,7 @@ Open **Settings > Plugin Manager > Frigate NVR Explorer > Settings** in Kiosk Sa
 | **UI Scale Factor** | `uiScaleFactor` | `1.0` | Additional scaling multiplier (`0.5`–`3.0`, step `0.05`) applied on top of Kiosk Satellite's global UI scale. |
 | **Show stream transport badge** | `showStreamModePill` | `true` | Displays the active transport badge (`MSE`, `MJPEG`, `EXO`, `HLS`, `MP4`, `PREVIEW`) in the player header. |
 | **Preview clips on selection** | `previewClipsOnSelection` | `true` | Plays a short looping video preview when an event thumbnail is selected instead of opening the player immediately. |
+| **Highlight cameras with active events** | `highlightOngoingEvents` | `true` | Highlights camera cards with an alert border and badge when an event or detection is actively in progress. |
 | **Show object bounding boxes by default** | `showObjectBoxesByDefault` | `false` | Enables object detection bounding boxes automatically in event and history playback. |
 | **Object box time offset (s)** | `bboxTimeOffsetSec` | `1.0` | Time shift in seconds (`-5.0` to `+5.0`, step `0.25`) to align bounding boxes with recorded video (typically `+1.0` to `+2.5` s depending on camera GOP and stream latency). |
 | **Mute audio by default** | `muteAudioByDefault` | `false` | Starts live streams and recorded clips muted when opening the player. |
