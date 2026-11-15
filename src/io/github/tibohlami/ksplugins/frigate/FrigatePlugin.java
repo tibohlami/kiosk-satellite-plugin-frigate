@@ -148,16 +148,19 @@ public final class FrigatePlugin implements KioskPlugin {
         if (settings == null) return;
         boolean uiScaleChanged = false;
         boolean pillChanged = false;
+        boolean showLatestEventsChanged = false;
         boolean languageChanged = false;
         if (config != null) {
             float prevScale = config.getUiScale();
             boolean prevPill = config.isShowStreamModePill();
+            boolean prevShowLatestEvents = config.isShowLatestEvents();
             String prevLanguage = config.getLanguage();
             // Mirror host settings in memory without calling host.saveSettings(),
             // which would overwrite/drop host-persisted keys.
             config.updateFrom(settings);
             uiScaleChanged = Math.abs(config.getUiScale() - prevScale) > 0.001f;
             pillChanged = (config.isShowStreamModePill() != prevPill);
+            showLatestEventsChanged = (config.isShowLatestEvents() != prevShowLatestEvents);
             languageChanged = !config.getLanguage().equals(prevLanguage);
             if (imageLoader != null) {
                 imageLoader.setConfig(config);
@@ -179,8 +182,14 @@ public final class FrigatePlugin implements KioskPlugin {
             if (isPlayerOpen && lastPlayerEvent != null) {
                 showPlayerModal(lastPlayerEvent);
             }
-        } else if (pillChanged && isPlayerOpen && lastPlayerEvent != null) {
-            showPlayerModal(lastPlayerEvent);
+        } else {
+            if (showLatestEventsChanged && isExplorerOpen
+                    && activeExplorerOverlay != null && !activeExplorerOverlay.isDestroyed()) {
+                activeExplorerOverlay.onShowLatestEventsChanged();
+            }
+            if (pillChanged && isPlayerOpen && lastPlayerEvent != null) {
+                showPlayerModal(lastPlayerEvent);
+            }
         }
     }
 

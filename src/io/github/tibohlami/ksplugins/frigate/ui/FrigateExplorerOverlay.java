@@ -71,6 +71,7 @@ public class FrigateExplorerOverlay {
     private View eventsBrowserRoot;
     private FrigateEventsBrowserView eventsBrowser;
     private LinearLayout recentEventsContainer;
+    private HorizontalScrollView eventsScroll;
     private LinearLayout camerasGridContainer;
     private TextView eventsSectionTitle;
     private TextView camerasSectionTitle;
@@ -217,7 +218,7 @@ public class FrigateExplorerOverlay {
         eventsSectionTitle.setPadding(0, 0, 0, s(4));
         contentCol.addView(eventsSectionTitle);
 
-        HorizontalScrollView eventsScroll = new HorizontalScrollView(context);
+        eventsScroll = new HorizontalScrollView(context);
         eventsScroll.setHorizontalScrollBarEnabled(false);
         eventsScroll.setPadding(0, 0, 0, s(20));
 
@@ -225,6 +226,7 @@ public class FrigateExplorerOverlay {
         recentEventsContainer.setOrientation(LinearLayout.HORIZONTAL);
         eventsScroll.addView(recentEventsContainer);
         contentCol.addView(eventsScroll);
+        updateLatestEventsSectionVisibility();
 
         // --- SECTION 2: Cameras ---
         camerasSectionTitle = new TextView(context);
@@ -726,8 +728,56 @@ public class FrigateExplorerOverlay {
         }
     }
 
+    public void onShowLatestEventsChanged() {
+        mainHandler.post(() -> {
+            if (isDestroyed) return;
+            updateLatestEventsSectionVisibility();
+            if (shouldShowLatestEvents()) {
+                loadEvents(false);
+            }
+            if (homeScrollView != null) {
+                homeScrollView.requestLayout();
+            }
+        });
+    }
+
+    private boolean shouldShowLatestEvents() {
+        return config == null || config.isShowLatestEvents();
+    }
+
+    private void updateLatestEventsSectionVisibility() {
+        boolean visible = shouldShowLatestEvents();
+        int vis = visible ? View.VISIBLE : View.GONE;
+        if (eventsSectionTitle != null) {
+            eventsSectionTitle.setVisibility(vis);
+        }
+        if (eventsScroll != null) {
+            eventsScroll.setVisibility(vis);
+        }
+        if (!visible) {
+            recentPreviewController.detach();
+            recentHighlightMap.clear();
+            recentSeverityMap.clear();
+            selectedRecentEventId = null;
+            loadedEvents.clear();
+            if (recentEventsContainer != null) {
+                recentEventsContainer.removeAllViews();
+            }
+        }
+    }
+
     private void loadEvents(final boolean silent) {
-        if (eventsRefreshInFlight || isDestroyed) return;
+        if (isDestroyed) return;
+        updateLatestEventsSectionVisibility();
+        if (!shouldShowLatestEvents()) {
+            eventsRefreshInFlight = false;
+            stopRefreshSpinner();
+            if (statusTextView != null) {
+                statusTextView.setVisibility(View.GONE);
+            }
+            return;
+        }
+        if (eventsRefreshInFlight) return;
         eventsRefreshInFlight = true;
         startRefreshSpinner();
 
