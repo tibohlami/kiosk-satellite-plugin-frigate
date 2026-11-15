@@ -260,147 +260,103 @@ public class FrigateEventsRepository {
                 ? ((dayBounds != null) ? Math.min(beforeEpoch, dayBounds[1]) : beforeEpoch)
                 : ((dayBounds != null) ? dayBounds[1] : 0L);
 
-        if ("all".equals(sevFilter)) {
-            apiClient.fetchEventsFiltered(camFilter, lblFilter, queryAfter, queryBefore, PAGE_EVENTS_LIMIT,
-                    new FrigateApiClient.Callback<List<FrigateEvent>>() {
-                        @Override
-                        public void onSuccess(List<FrigateEvent> rawEvents) {
-                            if (isDestroyed || querySeq != activeQuerySeq) return;
-                            final List<FrigateEvent> pageEvents = rawEvents != null ? rawEvents : Collections.emptyList();
-                            if (pageEvents.isEmpty()) {
-                                // Fallback to /api/review when /api/events has no entries
-                                apiClient.fetchReviewSegmentsFiltered(camFilter, lblFilter, null, queryAfter, queryBefore,
-                                        PAGE_REVIEW_LIMIT, new FrigateApiClient.Callback<List<ReviewSegment>>() {
-                                            @Override
-                                            public void onSuccess(List<ReviewSegment> reviews) {
-                                                if (isDestroyed || querySeq != activeQuerySeq) return;
-                                                List<FrigateEvent> synthetic = mergeEventsAndReviews(
-                                                        query, Collections.emptyList(), reviews, "all", dayBounds, true);
-                                                if (synthetic.isEmpty()) {
-                                                    mainHandler.post(() -> notifyEmptyPage(querySeq, isInitialPage));
-                                                    return;
-                                                }
-                                                boolean more = reviews != null && reviews.size() >= PAGE_REVIEW_LIMIT;
-                                                mainHandler.post(() -> deliverLoadedPage(querySeq, synthetic, more, isInitialPage));
-                                            }
-
-                                            @Override
-                                            public void onError(Exception e) {
-                                                if (isDestroyed || querySeq != activeQuerySeq) return;
-                                                mainHandler.post(() -> notifyEmptyPage(querySeq, isInitialPage));
-                                            }
-                                        });
-                                return;
-                            }
-                            double minStart = Double.MAX_VALUE;
-                            double maxEnd = 0.0;
-                            for (FrigateEvent ev : pageEvents) {
-                                if (ev.getStartTime() > 0 && ev.getStartTime() < minStart) minStart = ev.getStartTime();
-                                double end = Math.max(ev.getStartTime(), ev.getEndTime());
-                                if (end > maxEnd) maxEnd = end;
-                            }
-                            long revAfter = (dayBounds != null && isInitialPage)
-                                    ? queryAfter
-                                    : Math.max(queryAfter, (long) Math.floor(minStart) - 60L);
-                            long revBefore = (dayBounds != null && isInitialPage)
-                                    ? queryBefore
-                                    : ((queryBefore > 0L)
-                                        ? Math.min(queryBefore + 60L, (long) Math.ceil(maxEnd) + 60L)
-                                        : (long) Math.ceil(maxEnd) + 60L);
-
-                            apiClient.fetchReviewSegmentsFiltered(camFilter, lblFilter, null, revAfter, revBefore, 400,
-                                    new FrigateApiClient.Callback<List<ReviewSegment>>() {
-                                        @Override
-                                        public void onSuccess(List<ReviewSegment> reviews) {
-                                            if (isDestroyed || querySeq != activeQuerySeq) return;
-                                            List<FrigateEvent> enriched = mergeEventsAndReviews(
-                                                    query, pageEvents, reviews, "all", dayBounds, dayBounds != null);
-                                            boolean more = pageEvents.size() >= PAGE_EVENTS_LIMIT
-                                                    || (reviews != null && reviews.size() >= 400);
-                                            mainHandler.post(() -> deliverLoadedPage(querySeq, enriched, more, isInitialPage));
-                                        }
-
-                                        @Override
-                                        public void onError(Exception e) {
-                                            if (isDestroyed || querySeq != activeQuerySeq) return;
-                                            List<FrigateEvent> fallback = mergeEventsAndReviews(
-                                                    query, pageEvents, null, "all", dayBounds, false);
-                                            mainHandler.post(() -> deliverLoadedPage(
-                                                    querySeq, fallback, pageEvents.size() >= PAGE_EVENTS_LIMIT, isInitialPage));
-                                        }
-                                    });
-                        }
-
-                        @Override
-                        public void onError(Exception e) {
-                            if (isDestroyed || querySeq != activeQuerySeq) return;
-                            mainHandler.post(() -> notifyLoadError(querySeq, isInitialPage));
-                        }
-                    });
-        } else {
-            // Filter by explicit severity ("alert" or "detection") via /api/review first
-            apiClient.fetchReviewSegmentsFiltered(camFilter, lblFilter, sevFilter, queryAfter, queryBefore, PAGE_REVIEW_LIMIT,
-                    new FrigateApiClient.Callback<List<ReviewSegment>>() {
-                        @Override
-                        public void onSuccess(List<ReviewSegment> reviews) {
-                            if (isDestroyed || querySeq != activeQuerySeq) return;
-                            if (reviews == null || reviews.isEmpty()) {
+        final String apiSev = "all".equals(sevFilter) ? null : sevFilter;
+        apiClient.fetchReviewSegmentsFiltered(camFilter, lblFilter, apiSev, queryAfter, queryBefore, PAGE_REVIEW_LIMIT,
+                new FrigateApiClient.Callback<List<ReviewSegment>>() {
+                    @Override
+                    public void onSuccess(List<ReviewSegment> reviews) {
+                        if (isDestroyed || querySeq != activeQuerySeq) return;
+                        if (reviews != null && !reviews.isEmpty()) {
+                            List<FrigateEvent> aggregated = buildEventsFromReviews(query, reviews, sevFilter, dayBounds);
+                            if (aggregated.isEmpty()) {
                                 mainHandler.post(() -> notifyEmptyPage(querySeq, isInitialPage));
                                 return;
                             }
                             double minStart = Double.MAX_VALUE;
-                            double maxEnd = 0.0;
                             for (ReviewSegment rev : reviews) {
-                                if (rev.startTime < minStart) minStart = rev.startTime;
-                                if (rev.endTime > maxEnd) maxEnd = rev.endTime;
+                                if (rev.startTime > 0.0 && rev.startTime < minStart) {
+                                    minStart = rev.startTime;
+                                }
                             }
                             final double batchMinStart = minStart;
-                            long evAfter = Math.max(queryAfter, (long) Math.floor(batchMinStart) - 10L);
-                            long evBefore = (queryBefore > 0L)
-                                    ? Math.min(queryBefore, (long) Math.ceil(maxEnd) + 10L)
-                                    : (long) Math.ceil(maxEnd) + 10L;
-
-                            apiClient.fetchEventsFiltered(camFilter, lblFilter, evAfter, evBefore, 1000,
-                                    new FrigateApiClient.Callback<List<FrigateEvent>>() {
-                                        @Override
-                                        public void onSuccess(List<FrigateEvent> events) {
-                                            if (isDestroyed || querySeq != activeQuerySeq) return;
-                                            List<FrigateEvent> matched = mergeEventsAndReviews(
-                                                    query, events, reviews, sevFilter, dayBounds, true);
-                                            mainHandler.post(() -> {
-                                                if (batchMinStart < Double.MAX_VALUE &&
-                                                        (oldestFetchedStartTime <= 0.0 || batchMinStart < oldestFetchedStartTime)) {
-                                                    oldestFetchedStartTime = batchMinStart;
-                                                }
-                                                deliverLoadedPage(querySeq, matched,
-                                                        reviews.size() >= PAGE_REVIEW_LIMIT, isInitialPage);
-                                            });
-                                        }
-
-                                        @Override
-                                        public void onError(Exception e) {
-                                            if (isDestroyed || querySeq != activeQuerySeq) return;
-                                            List<FrigateEvent> fallback = mergeEventsAndReviews(
-                                                    query, Collections.emptyList(), reviews, sevFilter, dayBounds, true);
-                                            mainHandler.post(() -> {
-                                                if (batchMinStart < Double.MAX_VALUE &&
-                                                        (oldestFetchedStartTime <= 0.0 || batchMinStart < oldestFetchedStartTime)) {
-                                                    oldestFetchedStartTime = batchMinStart;
-                                                }
-                                                deliverLoadedPage(querySeq, fallback,
-                                                        reviews.size() >= PAGE_REVIEW_LIMIT, isInitialPage);
-                                            });
-                                        }
-                                    });
+                            final boolean more = reviews.size() >= PAGE_REVIEW_LIMIT;
+                            mainHandler.post(() -> {
+                                if (batchMinStart < Double.MAX_VALUE &&
+                                        (oldestFetchedStartTime <= 0.0 || batchMinStart < oldestFetchedStartTime)) {
+                                    oldestFetchedStartTime = batchMinStart;
+                                }
+                                deliverLoadedPage(querySeq, aggregated, more, isInitialPage);
+                            });
+                            return;
                         }
-
-                        @Override
-                        public void onError(Exception e) {
-                            if (isDestroyed || querySeq != activeQuerySeq) return;
-                            mainHandler.post(() -> notifyLoadError(querySeq, isInitialPage));
+                        if (isInitialPage && "all".equals(sevFilter)) {
+                            loadLegacyEventsFallback(query, querySeq, camFilter, lblFilter, queryAfter, queryBefore, dayBounds, isInitialPage);
+                        } else {
+                            mainHandler.post(() -> notifyEmptyPage(querySeq, isInitialPage));
                         }
-                    });
+                    }
+
+                    @Override
+                    public void onError(Exception e) {
+                        if (isDestroyed || querySeq != activeQuerySeq) return;
+                        loadLegacyEventsFallback(query, querySeq, camFilter, lblFilter, queryAfter, queryBefore, dayBounds, isInitialPage);
+                    }
+                });
+    }
+
+    private void loadLegacyEventsFallback(FilterQuery query, int querySeq,
+                                          String camFilter, String lblFilter,
+                                          long queryAfter, long queryBefore,
+                                          long[] dayBounds, boolean isInitialPage) {
+        apiClient.fetchEventsFiltered(camFilter, lblFilter, queryAfter, queryBefore, PAGE_EVENTS_LIMIT,
+                new FrigateApiClient.Callback<List<FrigateEvent>>() {
+                    @Override
+                    public void onSuccess(List<FrigateEvent> rawEvents) {
+                        if (isDestroyed || querySeq != activeQuerySeq) return;
+                        final List<FrigateEvent> pageEvents = rawEvents != null ? rawEvents : Collections.emptyList();
+                        if (pageEvents.isEmpty()) {
+                            mainHandler.post(() -> notifyEmptyPage(querySeq, isInitialPage));
+                            return;
+                        }
+                        List<FrigateEvent> filtered = mergeEventsAndReviews(
+                                query, pageEvents, null, query.selectedSeverity, dayBounds, false);
+                        boolean more = pageEvents.size() >= PAGE_EVENTS_LIMIT;
+                        mainHandler.post(() -> deliverLoadedPage(querySeq, filtered, more, isInitialPage));
+                    }
+
+                    @Override
+                    public void onError(Exception e) {
+                        if (isDestroyed || querySeq != activeQuerySeq) return;
+                        mainHandler.post(() -> notifyLoadError(querySeq, isInitialPage));
+                    }
+                });
+    }
+
+    private List<FrigateEvent> buildEventsFromReviews(FilterQuery query,
+                                                      List<ReviewSegment> reviews,
+                                                      String requiredSeverity,
+                                                      long[] dayBounds) {
+        List<FrigateEvent> out = new ArrayList<>(reviews.size());
+        boolean filterBySeverity = requiredSeverity != null && !"all".equals(requiredSeverity);
+        for (ReviewSegment rev : reviews) {
+            if (rev.startTime <= 0.0) continue;
+            if (dayBounds != null && (rev.startTime < dayBounds[0] || rev.startTime >= dayBounds[1])) {
+                continue;
+            }
+            if (!query.selectedCameras.isEmpty() && (rev.camera == null || !query.selectedCameras.contains(rev.camera))) {
+                continue;
+            }
+            String revSev = (rev.severity != null && !rev.severity.isEmpty()) ? rev.severity : "detection";
+            if (filterBySeverity && !requiredSeverity.equalsIgnoreCase(revSev)) {
+                continue;
+            }
+            if (!query.selectedLabels.isEmpty() && pickMatchingReviewLabel(query.selectedLabels, rev) == null) {
+                continue;
+            }
+            String thumbUrl = apiClient.getReviewThumbnailUrl(rev);
+            out.add(FrigateEvent.fromReviewSegment(rev, thumbUrl, 0.0, null, rev.endTime > rev.startTime));
         }
+        return out;
     }
 
     private void notifyEmptyPage(int querySeq, boolean isInitialPage) {

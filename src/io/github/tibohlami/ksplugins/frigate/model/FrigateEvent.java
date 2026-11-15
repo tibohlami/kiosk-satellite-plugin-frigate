@@ -9,8 +9,10 @@ import org.json.JSONObject;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * Model representing a Frigate detection event or review item.
@@ -50,13 +52,16 @@ public class FrigateEvent {
     private final List<PathPoint> pathData;
     private final String thumbnailUrlOverride;
     private final boolean reviewFallback;
+    private final List<String> objects;
+    private final List<String> detectionIds;
+    private final String reviewId;
 
     public FrigateEvent(String id, String camera, String label, String subLabel,
                         double topScore, double startTime, double endTime,
                         boolean hasClip, boolean hasSnapshot, List<String> zones,
                         String severity) {
         this(id, camera, label, subLabel, topScore, startTime, endTime,
-                hasClip, hasSnapshot, zones, severity, null, 0.0, null, null, false);
+                hasClip, hasSnapshot, zones, severity, null, 0.0, null, null, false, null, null, null);
     }
 
     public FrigateEvent(String id, String camera, String label, String subLabel,
@@ -65,7 +70,8 @@ public class FrigateEvent {
                         String severity, float[] snapshotBox, double snapshotFrameTime,
                         List<PathPoint> pathData) {
         this(id, camera, label, subLabel, topScore, startTime, endTime,
-                hasClip, hasSnapshot, zones, severity, snapshotBox, snapshotFrameTime, pathData, null, false);
+                hasClip, hasSnapshot, zones, severity, snapshotBox, snapshotFrameTime, pathData,
+                null, false, null, null, null);
     }
 
     public FrigateEvent(String id, String camera, String label, String subLabel,
@@ -73,6 +79,17 @@ public class FrigateEvent {
                         boolean hasClip, boolean hasSnapshot, List<String> zones,
                         String severity, float[] snapshotBox, double snapshotFrameTime,
                         List<PathPoint> pathData, String thumbnailUrlOverride, boolean reviewFallback) {
+        this(id, camera, label, subLabel, topScore, startTime, endTime,
+                hasClip, hasSnapshot, zones, severity, snapshotBox, snapshotFrameTime, pathData,
+                thumbnailUrlOverride, reviewFallback, null, null, null);
+    }
+
+    public FrigateEvent(String id, String camera, String label, String subLabel,
+                        double topScore, double startTime, double endTime,
+                        boolean hasClip, boolean hasSnapshot, List<String> zones,
+                        String severity, float[] snapshotBox, double snapshotFrameTime,
+                        List<PathPoint> pathData, String thumbnailUrlOverride, boolean reviewFallback,
+                        List<String> objects, List<String> detectionIds, String reviewId) {
         this.id = id;
         this.camera = camera;
         this.label = label;
@@ -90,6 +107,52 @@ public class FrigateEvent {
         this.thumbnailUrlOverride = (thumbnailUrlOverride != null && !thumbnailUrlOverride.trim().isEmpty())
                 ? thumbnailUrlOverride.trim() : null;
         this.reviewFallback = reviewFallback;
+        this.objects = normalizeObjects(objects, label);
+        this.detectionIds = (detectionIds != null && !detectionIds.isEmpty())
+                ? Collections.unmodifiableList(new ArrayList<>(detectionIds))
+                : Collections.emptyList();
+        this.reviewId = (reviewId != null && !reviewId.trim().isEmpty()) ? reviewId.trim() : null;
+    }
+
+    private static List<String> normalizeObjects(List<String> rawObjects, String primaryLabel) {
+        Set<String> unique = new LinkedHashSet<>();
+        if (rawObjects != null) {
+            for (String obj : rawObjects) {
+                if (obj != null) {
+                    String trimmed = obj.trim();
+                    if (!trimmed.isEmpty()) {
+                        unique.add(trimmed);
+                    }
+                }
+            }
+        }
+        if (unique.isEmpty() && primaryLabel != null && !primaryLabel.trim().isEmpty()) {
+            unique.add(primaryLabel.trim());
+        }
+        return unique.isEmpty()
+                ? Collections.emptyList()
+                : Collections.unmodifiableList(new ArrayList<>(unique));
+    }
+
+    /**
+     * Creates an aggregated FrigateEvent backed by a /api/review segment.
+     */
+    public static FrigateEvent fromReviewSegment(ReviewSegment rev, String thumbnailUrlOverride,
+                                                  double topScore, String subLabel, boolean hasClip) {
+        String cam = (rev.camera != null && !rev.camera.trim().isEmpty()) ? rev.camera.trim() : "unknown";
+        String revSev = (rev.severity != null && !rev.severity.trim().isEmpty()) ? rev.severity.trim() : "detection";
+        List<String> objs = normalizeObjects(rev.objects, null);
+        String primaryLabel = !objs.isEmpty() ? objs.get(0) : "motion";
+        if (objs.isEmpty()) {
+            objs = Collections.singletonList(primaryLabel);
+        }
+        String synthId = (rev.id != null && !rev.id.trim().isEmpty())
+                ? ("rev:" + rev.id.trim())
+                : ("rev:" + cam + ":" + Math.round(rev.startTime * 1000.0));
+        boolean hasThumb = thumbnailUrlOverride != null && !thumbnailUrlOverride.trim().isEmpty();
+        return new FrigateEvent(synthId, cam, primaryLabel, subLabel, topScore,
+                rev.startTime, rev.endTime, hasClip, hasThumb, Collections.emptyList(), revSev,
+                null, 0.0, null, thumbnailUrlOverride, true, objs, rev.detectionIds, rev.id);
     }
 
     /**
@@ -104,7 +167,7 @@ public class FrigateEvent {
         boolean hasThumb = thumbnailUrlOverride != null && !thumbnailUrlOverride.trim().isEmpty();
         return new FrigateEvent(id, camera, safeLabel, null, 0.0, startTime, endTime,
                 hasClip, hasThumb, Collections.emptyList(), severity, null, 0.0, null,
-                thumbnailUrlOverride, true);
+                thumbnailUrlOverride, true, Collections.singletonList(safeLabel), null, null);
     }
 
     public static FrigateEvent fromJson(JSONObject json) {
@@ -210,6 +273,9 @@ public class FrigateEvent {
     public List<PathPoint> getPathData() { return pathData; }
     public String getThumbnailUrlOverride() { return thumbnailUrlOverride; }
     public boolean isReviewFallback() { return reviewFallback; }
+    public List<String> getObjects() { return objects; }
+    public List<String> getDetectionIds() { return detectionIds; }
+    public String getReviewId() { return reviewId; }
 
     public String getEffectiveThumbnailUrl(String defaultThumbnailUrl) {
         return (thumbnailUrlOverride != null && !thumbnailUrlOverride.isEmpty())
@@ -223,7 +289,7 @@ public class FrigateEvent {
         }
         return new FrigateEvent(id, camera, label, subLabel, topScore, startTime, endTime,
                 hasClip, hasSnapshot, zones, newSeverity, snapshotBox, snapshotFrameTime, pathData,
-                thumbnailUrlOverride, reviewFallback);
+                thumbnailUrlOverride, reviewFallback, objects, detectionIds, reviewId);
     }
 
     public double getDurationSeconds() {

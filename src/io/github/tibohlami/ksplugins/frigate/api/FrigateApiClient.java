@@ -328,115 +328,44 @@ public class FrigateApiClient {
     // --- API Calls ---
 
     /**
-     * Fetches the most recent events and enriches them with Frigate 0.14+ /api/review
-     * severity classifications ("alert" vs "detection") so Explorer cards match the Events browser.
+     * Fetches the most recent aggregated review items from Frigate 0.14+ /api/review
+     * (matching Frigate's /review UI), falling back to /api/events on older servers.
      */
     public void fetchRecentEventsEnriched(int limit, Callback<List<FrigateEvent>> callback) {
+        if (isShutdown || executor.isShutdown()) return;
+        fetchReviewSegmentsFiltered(null, null, null, 0L, 0L, limit, new Callback<List<ReviewSegment>>() {
+            @Override
+            public void onSuccess(List<ReviewSegment> reviews) {
+                if (isShutdown) return;
+                if (reviews != null && !reviews.isEmpty()) {
+                    List<FrigateEvent> aggregated = new ArrayList<>(reviews.size());
+                    for (ReviewSegment rev : reviews) {
+                        if (rev.startTime <= 0.0) continue;
+                        String thumbUrl = getReviewThumbnailUrl(rev);
+                        aggregated.add(FrigateEvent.fromReviewSegment(
+                                rev, thumbUrl, 0.0, null, rev.endTime > rev.startTime));
+                    }
+                    callback.onSuccess(aggregated);
+                    return;
+                }
+                fetchRecentEventsLegacyFallback(limit, callback);
+            }
+
+            @Override
+            public void onError(Exception e) {
+                if (isShutdown) return;
+                fetchRecentEventsLegacyFallback(limit, callback);
+            }
+        });
+    }
+
+    private void fetchRecentEventsLegacyFallback(int limit, Callback<List<FrigateEvent>> callback) {
         if (isShutdown || executor.isShutdown()) return;
         fetchEvents(null, null, limit, new Callback<List<FrigateEvent>>() {
             @Override
             public void onSuccess(List<FrigateEvent> rawEvents) {
                 if (isShutdown) return;
-                final List<FrigateEvent> events = (rawEvents != null) ? rawEvents : Collections.emptyList();
-                if (events.isEmpty()) {
-                    fetchReviewSegmentsFiltered(null, null, null, 0L, 0L, limit, new Callback<List<ReviewSegment>>() {
-                        @Override
-                        public void onSuccess(List<ReviewSegment> reviews) {
-                            if (isShutdown) return;
-                            if (reviews == null || reviews.isEmpty()) {
-                                callback.onSuccess(Collections.emptyList());
-                                return;
-                            }
-                            List<FrigateEvent> synthetic = new ArrayList<>();
-                            for (ReviewSegment rev : reviews) {
-                                if (rev.startTime <= 0.0) continue;
-                                String revSev = (rev.severity != null && !rev.severity.isEmpty()) ? rev.severity : "detection";
-                                String label = (!rev.objects.isEmpty()) ? rev.objects.get(0) : "motion";
-                                String synthId = (rev.id != null && !rev.id.isEmpty())
-                                        ? ("rev:" + rev.id)
-                                        : ("rev:" + (rev.camera != null ? rev.camera : "cam") + ":" + Math.round(rev.startTime * 1000.0));
-                                String thumbUrl = getReviewThumbnailUrl(rev);
-                                synthetic.add(FrigateEvent.fromReviewFallback(
-                                        synthId, rev.camera != null ? rev.camera : "unknown",
-                                        label, rev.startTime, rev.endTime, revSev, thumbUrl, false));
-                            }
-                            callback.onSuccess(synthetic);
-                        }
-
-                        @Override
-                        public void onError(Exception e) {
-                            if (isShutdown) return;
-                            callback.onSuccess(Collections.emptyList());
-                        }
-                    });
-                    return;
-                }
-
-                double minStart = Double.MAX_VALUE;
-                double maxEnd = 0.0;
-                for (FrigateEvent ev : events) {
-                    if (ev.getStartTime() > 0 && ev.getStartTime() < minStart) minStart = ev.getStartTime();
-                    double end = Math.max(ev.getStartTime(), ev.getEndTime());
-                    if (end > maxEnd) maxEnd = end;
-                }
-                long revAfter = (minStart != Double.MAX_VALUE) ? Math.max(0L, (long) Math.floor(minStart) - 60L) : 0L;
-                long revBefore = (long) Math.ceil(maxEnd) + 60L;
-
-                fetchReviewSegmentsFiltered(null, null, null, revAfter, revBefore, 400, new Callback<List<ReviewSegment>>() {
-                    @Override
-                    public void onSuccess(List<ReviewSegment> reviews) {
-                        if (isShutdown) return;
-                        if (reviews == null || reviews.isEmpty()) {
-                            callback.onSuccess(events);
-                            return;
-                        }
-                        Map<String, String> byIdSeverity = new HashMap<>();
-                        for (ReviewSegment rev : reviews) {
-                            if (rev.detectionIds != null) {
-                                for (String detId : rev.detectionIds) {
-                                    String existing = byIdSeverity.get(detId);
-                                    if (!"alert".equals(existing)) {
-                                        byIdSeverity.put(detId, rev.severity);
-                                    }
-                                }
-                            }
-                        }
-
-                        List<FrigateEvent> enriched = new ArrayList<>(events.size());
-                        for (FrigateEvent ev : events) {
-                            String resolved = byIdSeverity.get(ev.getId());
-                            if (resolved == null) {
-                                double evStart = ev.getStartTime();
-                                double evEnd = Math.max(evStart, ev.getEndTime());
-                                for (ReviewSegment rev : reviews) {
-                                    if (rev.camera != null && !rev.camera.isEmpty() && !rev.camera.equals(ev.getCamera())) {
-                                        continue;
-                                    }
-                                    if (evEnd >= (rev.startTime - 2.0) && evStart <= (rev.endTime + 2.0)) {
-                                        if (rev.objects.isEmpty() || rev.objects.contains(ev.getLabel())) {
-                                            resolved = rev.severity;
-                                            if ("alert".equals(resolved)) break;
-                                        }
-                                    }
-                                }
-                            }
-                            if (resolved == null && ev.getSeverity() != null && !ev.getSeverity().isEmpty()) {
-                                resolved = ev.getSeverity();
-                            }
-                            if (resolved == null) {
-                                resolved = "detection";
-                            }
-                            enriched.add(ev.withSeverity(resolved));
-                        }
-                        callback.onSuccess(enriched);
-                    }
-
-                    @Override
-                    public void onError(Exception e) {
-                        if (isShutdown) return;
-                        callback.onSuccess(events);
-                    }
-                });
+                callback.onSuccess((rawEvents != null) ? rawEvents : Collections.emptyList());
             }
 
             @Override
