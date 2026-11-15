@@ -4,6 +4,7 @@ package io.github.tibohlami.ksplugins.frigate.api;
 import io.github.tibohlami.ksplugins.frigate.model.DaySummary;
 import io.github.tibohlami.ksplugins.frigate.model.FrigateCamera;
 import io.github.tibohlami.ksplugins.frigate.model.FrigateEvent;
+import io.github.tibohlami.ksplugins.frigate.model.PreviewSegment;
 import io.github.tibohlami.ksplugins.frigate.model.RecordingSegment;
 import io.github.tibohlami.ksplugins.frigate.model.ReviewSegment;
 import io.github.tibohlami.ksplugins.frigate.model.TimelineBoxEntry;
@@ -238,5 +239,53 @@ final class FrigateJsonParser {
         if (total > 0) {
             out.add(new DaySummary(day, "", "", total));
         }
+    }
+
+    static Set<String> parseRecordingsSummary(String response) throws Exception {
+        JSONArray array = new JSONArray(response);
+        Set<String> out = new LinkedHashSet<>(array.length());
+        for (int i = 0; i < array.length(); i++) {
+            JSONObject obj = array.optJSONObject(i);
+            if (obj == null) continue;
+            String day = obj.optString("day", "").trim();
+            if (day.length() > 10 && day.charAt(4) == '-' && day.charAt(7) == '-') {
+                day = day.substring(0, 10);
+            }
+            if (day.length() != 10 || day.charAt(4) != '-' || day.charAt(7) != '-') continue;
+            boolean hasRecording = false;
+            JSONArray hours = obj.optJSONArray("hours");
+            if (hours != null) {
+                for (int h = 0; h < hours.length(); h++) {
+                    JSONObject hObj = hours.optJSONObject(h);
+                    if (hObj == null || hObj.optDouble("duration", 1.0) > 0.0) {
+                        hasRecording = true;
+                        break;
+                    }
+                }
+            } else {
+                hasRecording = obj.optInt("events", 0) > 0 || obj.optDouble("duration", 0.0) > 0.0;
+            }
+            if (hasRecording) {
+                out.add(day);
+            }
+        }
+        return out;
+    }
+
+    static List<PreviewSegment> parsePreviews(String response) throws Exception {
+        JSONArray array = new JSONArray(response);
+        List<PreviewSegment> out = new ArrayList<>(array.length());
+        for (int i = 0; i < array.length(); i++) {
+            JSONObject obj = array.optJSONObject(i);
+            if (obj == null) continue;
+            String cam = obj.optString("camera", "").trim();
+            String src = obj.optString("src", "").trim();
+            String type = obj.optString("type", "").trim();
+            double start = obj.optDouble("start", 0.0);
+            double end = obj.optDouble("end", 0.0);
+            if (src.isEmpty() || end <= start) continue;
+            out.add(new PreviewSegment(cam, src, type, start, end));
+        }
+        return out;
     }
 }

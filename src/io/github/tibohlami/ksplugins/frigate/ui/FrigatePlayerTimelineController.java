@@ -10,6 +10,7 @@ import io.github.tibohlami.ksplugins.frigate.api.FrigateApiClient;
 import io.github.tibohlami.ksplugins.frigate.api.FrigateHttpHelper;
 import io.github.tibohlami.ksplugins.frigate.config.FrigateConfig;
 import me.jxl.kiosk.plugins.PluginHost;
+import io.github.tibohlami.ksplugins.frigate.model.DaySummary;
 import io.github.tibohlami.ksplugins.frigate.model.FrigateEvent;
 import io.github.tibohlami.ksplugins.frigate.model.RecordingSegment;
 import io.github.tibohlami.ksplugins.frigate.model.ReviewSegment;
@@ -21,8 +22,11 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
@@ -68,6 +72,9 @@ public class FrigatePlayerTimelineController {
 
     private volatile List<FrigateEvent> timelineEvents = Collections.emptyList();
     private volatile List<ReviewSegment> timelineReviews = Collections.emptyList();
+    private final List<DaySummary> availableDaySummaries = new ArrayList<>();
+    private final Set<String> availableRecordingDays = new LinkedHashSet<>();
+    private boolean daySummariesRequested = false;
 
     private boolean isHistoryChunkLoading = false;
     private boolean isLiveTailRefreshInFlight = false;
@@ -111,6 +118,10 @@ public class FrigatePlayerTimelineController {
     public void loadTimelineRecordings() {
         String camera = listener.getCurrentCamera();
         if (camera == null || camera.isEmpty()) return;
+        if (!daySummariesRequested) {
+            daySummariesRequested = true;
+            loadDaySummaries(camera);
+        }
         long now = System.currentTimeMillis() / 1000L;
         requestedHistoryMinEpoch = Math.min(requestedHistoryMinEpoch, Math.max(0L, now - TIMELINE_CHUNK_SECONDS));
         requestedHistoryMaxEpoch = Math.max(requestedHistoryMaxEpoch, now);
@@ -120,6 +131,148 @@ public class FrigatePlayerTimelineController {
         } else {
             pumpTimelineChunkQueue();
         }
+    }
+
+    private void loadDaySummaries(String camera) {
+        apiClient.fetchEventsSummary(new FrigateApiClient.Callback<List<DaySummary>>() {
+            @Override
+            public void onSuccess(List<DaySummary> result) {
+                if (listener.isClosed() || result == null) return;
+                mainHandler.post(() -> {
+                    if (listener.isClosed()) return;
+                    availableDaySummaries.clear();
+                    availableDaySummaries.addAll(result);
+                });
+            }
+
+            @Override
+            public void onError(Exception error) {
+                // Non-critical; calendar remains usable for any past day
+            }
+        });
+        apiClient.fetchRecordingsSummary(camera, new FrigateApiClient.Callback<Set<String>>() {
+            @Override
+            public void onSuccess(Set<String> result) {
+                if (listener.isClosed() || result == null) return;
+                mainHandler.post(() -> {
+                    if (listener.isClosed()) return;
+                    availableRecordingDays.clear();
+                    availableRecordingDays.addAll(result);
+                });
+            }
+
+            @Override
+            public void onError(Exception error) {
+                // Non-critical; calendar remains usable for any past day
+            }
+        });
+    }
+
+    public Map<String, Integer> getDayCountsForCurrentCamera() {
+        String camera = listener.getCurrentCamera();
+        Map<String, Integer> dayCounts = new TreeMap<>(Collections.reverseOrder());
+        for (DaySummary ds : availableDaySummaries) {
+            if (camera != null && !camera.isEmpty() && !camera.equals(ds.camera)) continue;
+            Integer prev = dayCounts.get(ds.day);
+            dayCounts.put(ds.day, (prev != null ? prev : 0) + ds.count);
+        }
+        for (String recDay : availableRecordingDays) {
+            Integer prev = dayCounts.get(recDay);
+            if (prev == null || prev <= 0) {
+                dayCounts.put(recDay, 1);
+            }
+        }
+        return dayCounts;
+    }
+
+    public boolean isRangeLoaded(long startEpoch, long endEpoch) {
+        if (endEpoch <= startEpoch) return true;
+        for (long[] r : loadedTimelineRanges) {
+            if (r[0] <= startEpoch && r[1] >= endEpoch) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public long findFirstRecordingEpochInRange(long startEpoch, long endEpoch) {
+        for (RecordingSegment seg : allRecordingSegments) {
+            if (seg == null) continue;
+            if (seg.endTime > startEpoch && seg.startTime < endEpoch) {
+                return Math.max(startEpoch, (long) Math.floor(seg.startTime));
+            }
+        }
+        return -1L;
+    }
+
+    public long findFirstEventOrReviewEpochInRange(long startEpoch, long endEpoch) {
+        double best = Double.MAX_VALUE;
+        for (FrigateEvent ev : timelineEvents) {
+            if (ev == null || ev.getStartTime() <= 0) continue;
+            double end = Math.max(ev.getEndTime(), ev.getStartTime() + 1.0);
+            if (end > startEpoch && ev.getStartTime() < endEpoch) {
+                double clamped = Math.max(startEpoch, ev.getStartTime());
+                if (clamped < best) best = clamped;
+            }
+        }
+        if (best < Double.MAX_VALUE) {
+            return (long) Math.floor(best);
+        }
+        for (ReviewSegment rev : timelineReviews) {
+            if (rev == null || rev.startTime <= 0) continue;
+            double end = Math.max(rev.endTime, rev.startTime + 1.0);
+            if (end > startEpoch && rev.startTime < endEpoch) {
+                double clamped = Math.max(startEpoch, rev.startTime);
+                if (clamped < best) best = clamped;
+            }
+        }
+        return (best < Double.MAX_VALUE) ? (long) Math.floor(best) : -1L;
+    }
+
+    public FrigateEvent findEventAtOrNearEpoch(long epochSeconds) {
+        FrigateEvent overlapping = null;
+        FrigateEvent nearest = null;
+        double bestDist = Double.MAX_VALUE;
+        for (FrigateEvent ev : timelineEvents) {
+            if (ev == null || ev.getStartTime() <= 0) continue;
+            double start = ev.getStartTime();
+            double end = Math.max(ev.getEndTime(), start + 5.0);
+            if (epochSeconds >= start - 5.0 && epochSeconds <= end + 5.0) {
+                if (overlapping == null || start < overlapping.getStartTime()) {
+                    overlapping = ev;
+                }
+            } else if (start >= epochSeconds - 30.0 && start <= epochSeconds + 1800.0) {
+                double d = Math.abs(start - epochSeconds);
+                if (d < bestDist) {
+                    bestDist = d;
+                    nearest = ev;
+                }
+            }
+        }
+        return overlapping != null ? overlapping : nearest;
+    }
+
+    public ReviewSegment findReviewAtOrNearEpoch(long epochSeconds) {
+        ReviewSegment overlapping = null;
+        ReviewSegment nearest = null;
+        double bestDist = Double.MAX_VALUE;
+        for (ReviewSegment rev : timelineReviews) {
+            if (rev == null || rev.startTime <= 0) continue;
+            double start = rev.startTime;
+            double end = Math.max(rev.endTime, start + 5.0);
+            if (epochSeconds >= start - 5.0 && epochSeconds <= end + 5.0) {
+                if (overlapping == null || start < overlapping.startTime) {
+                    overlapping = rev;
+                }
+            } else if (start >= epochSeconds - 30.0 && start <= epochSeconds + 1800.0) {
+                double d = Math.abs(start - epochSeconds);
+                if (d < bestDist) {
+                    bestDist = d;
+                    nearest = rev;
+                }
+            }
+        }
+        return overlapping != null ? overlapping : nearest;
     }
 
     public void ensureTimelineCoverage(long viewBottomEpoch, long viewTopEpoch) {

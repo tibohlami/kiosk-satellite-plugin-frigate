@@ -6,6 +6,7 @@ import io.github.tibohlami.ksplugins.frigate.model.ConnectionTestResult;
 import io.github.tibohlami.ksplugins.frigate.model.DaySummary;
 import io.github.tibohlami.ksplugins.frigate.model.FrigateCamera;
 import io.github.tibohlami.ksplugins.frigate.model.FrigateEvent;
+import io.github.tibohlami.ksplugins.frigate.model.PreviewSegment;
 import io.github.tibohlami.ksplugins.frigate.model.RecordingSegment;
 import io.github.tibohlami.ksplugins.frigate.model.ReviewSegment;
 import io.github.tibohlami.ksplugins.frigate.model.TimelineBoxEntry;
@@ -31,6 +32,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.TimeZone;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -126,6 +128,35 @@ public class FrigateApiClient {
     public String getReviewPreviewUrl(String reviewId) {
         if (reviewId == null || reviewId.trim().isEmpty()) return null;
         return config.getFrigateUrl() + "/api/review/" + encodePath(reviewId.trim()) + "/preview?format=mp4";
+    }
+
+    public String getStaticPreviewUrl(String src) {
+        if (src == null || src.trim().isEmpty()) return null;
+        String clean = src.trim();
+        if (clean.startsWith("http://") || clean.startsWith("https://")) {
+            return clean;
+        }
+        return config.getFrigateUrl() + (clean.startsWith("/") ? clean : "/" + clean);
+    }
+
+    public void fetchPreviews(String camera, long afterSeconds, long beforeSeconds, Callback<List<PreviewSegment>> callback) {
+        if (isShutdown || executor.isShutdown() || camera == null || camera.trim().isEmpty()) return;
+        try {
+            executor.execute(() -> {
+                if (isShutdown) return;
+                try {
+                    String url = config.getFrigateUrl() + "/api/preview/" + encodePath(camera.trim())
+                            + "/start/" + afterSeconds + "/end/" + beforeSeconds;
+                    String response = executeGet(url);
+                    if (isShutdown) return;
+                    callback.onSuccess(FrigateJsonParser.parsePreviews(response));
+                } catch (Throwable e) {
+                    if (!isShutdown) {
+                        callback.onError(e instanceof Exception ? (Exception) e : new Exception(e));
+                    }
+                }
+            });
+        } catch (RejectedExecutionException ignored) {}
     }
 
     public String getCameraPreviewMp4Url(String camera, long startSeconds, long endSeconds) {
@@ -674,6 +705,38 @@ public class FrigateApiClient {
                     String response = executeGet(url);
                     if (isShutdown) return;
                     callback.onSuccess(FrigateJsonParser.parseReviewSummary(response));
+                } catch (Throwable e) {
+                    if (!isShutdown) {
+                        callback.onError(e instanceof Exception ? (Exception) e : new Exception(e));
+                    }
+                }
+            });
+        } catch (RejectedExecutionException ignored) {}
+    }
+
+    /**
+     * Fetches retained recording days for a camera (including 24/7 continuous days with 0 events).
+     */
+    public void fetchRecordingsSummary(String camera, Callback<Set<String>> callback) {
+        if (isShutdown || executor.isShutdown() || camera == null || camera.isEmpty()) return;
+        try {
+            executor.execute(() -> {
+                if (isShutdown) return;
+                try {
+                    String tzId = TimeZone.getDefault().getID();
+                    String encodedTz = URLEncoder.encode(tzId, "UTF-8");
+                    String response;
+                    try {
+                        String url = config.getFrigateUrl() + "/api/" + encodePath(camera)
+                                + "/recordings/summary?timezone=" + encodedTz;
+                        response = executeGet(url);
+                    } catch (Throwable primaryErr) {
+                        String fallbackUrl = config.getFrigateUrl() + "/api/recordings/summary?cameras="
+                                + URLEncoder.encode(camera, "UTF-8") + "&timezone=" + encodedTz;
+                        response = executeGet(fallbackUrl);
+                    }
+                    if (isShutdown) return;
+                    callback.onSuccess(FrigateJsonParser.parseRecordingsSummary(response));
                 } catch (Throwable e) {
                     if (!isShutdown) {
                         callback.onError(e instanceof Exception ? (Exception) e : new Exception(e));

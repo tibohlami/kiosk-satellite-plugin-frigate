@@ -28,6 +28,8 @@ import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.Renderer;
 import androidx.media3.exoplayer.analytics.AnalyticsListener;
 import androidx.media3.exoplayer.hls.HlsMediaSource;
+import androidx.media3.exoplayer.source.MediaSource;
+import androidx.media3.exoplayer.source.ProgressiveMediaSource;
 import androidx.media3.exoplayer.mediacodec.MediaCodecInfo;
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector;
 import androidx.media3.exoplayer.mediacodec.MediaCodecUtil;
@@ -63,6 +65,7 @@ public class FrigateExoPlaybackController {
         void onExoEnded();
         void onExoRetryWithSoftwareDecoder(String errorMsg);
         void onExoFallbackToHls(String errorMsg);
+        void onExoSourceNotFound();
     }
 
     private final Context context;
@@ -218,6 +221,16 @@ public class FrigateExoPlaybackController {
     }
 
     public void start(final int sessionId, final String hlsUrl, final boolean muted) {
+        startClip(sessionId, hlsUrl, muted, 0L, C.TIME_END_OF_SOURCE, 1.0f);
+    }
+
+    public void startPreview(final int sessionId, final String previewUrl, final long clipStartMs,
+                             final long clipEndMs, final float playbackSpeed) {
+        startClip(sessionId, previewUrl, true, clipStartMs, clipEndMs, playbackSpeed);
+    }
+
+    private void startClip(final int sessionId, final String mediaUrl, final boolean muted,
+                           final long clipStartMs, final long clipEndMs, final float playbackSpeed) {
         stop();
         listener.onExoPreparingSurface();
         if (exoTextureView != null) {
@@ -233,7 +246,7 @@ public class FrigateExoPlaybackController {
                         exoTextureView.setSurfaceTextureListener(null);
                     }
                     if (!listener.isClosed() && sessionId == listener.getStreamSessionId() && listener.isExoPlayback()) {
-                        launchExoPlayer(sessionId, hlsUrl, muted);
+                        launchExoPlayer(sessionId, mediaUrl, muted, clipStartMs, clipEndMs, playbackSpeed);
                     }
                 }
 
@@ -250,10 +263,11 @@ public class FrigateExoPlaybackController {
             });
             return;
         }
-        launchExoPlayer(sessionId, hlsUrl, muted);
+        launchExoPlayer(sessionId, mediaUrl, muted, clipStartMs, clipEndMs, playbackSpeed);
     }
 
-    private void launchExoPlayer(final int sessionId, final String hlsUrl, final boolean muted) {
+    private void launchExoPlayer(final int sessionId, final String hlsUrl, final boolean muted,
+                                 final long clipStartMs, final long clipEndMs, final float playbackSpeed) {
         try {
             Map<String, String> authHeaders = FrigateHttpHelper.buildAuthHeaders(config);
             HttpDataSource.Factory httpFactory;
@@ -269,9 +283,21 @@ public class FrigateExoPlaybackController {
                         .setReadTimeoutMs(15000)
                         .setAllowCrossProtocolRedirects(true);
             }
-            HlsMediaSource hlsMediaSource = new HlsMediaSource.Factory(httpFactory)
-                    .setAllowChunklessPreparation(true)
-                    .createMediaSource(MediaItem.fromUri(hlsUrl));
+            MediaItem.Builder itemBuilder = new MediaItem.Builder().setUri(hlsUrl);
+            if (clipStartMs > 0L || clipEndMs != C.TIME_END_OF_SOURCE) {
+                itemBuilder.setClippingConfiguration(
+                        new MediaItem.ClippingConfiguration.Builder()
+                                .setStartPositionMs(Math.max(0L, clipStartMs))
+                                .setEndPositionMs(clipEndMs)
+                                .build());
+            }
+            MediaItem mediaItem = itemBuilder.build();
+            MediaSource mediaSource = (hlsUrl != null && hlsUrl.contains(".m3u8"))
+                    ? new HlsMediaSource.Factory(httpFactory)
+                            .setAllowChunklessPreparation(true)
+                            .createMediaSource(mediaItem)
+                    : new ProgressiveMediaSource.Factory(httpFactory)
+                            .createMediaSource(mediaItem);
             DefaultLoadControl loadControl = new DefaultLoadControl.Builder()
                     .setBufferDurationsMs(15000, 60000, 500, 1500)
                     .build();
@@ -302,9 +328,12 @@ public class FrigateExoPlaybackController {
             player.setVideoTextureView(exoTextureView);
             player.setRepeatMode(listener.shouldLoopPlayback() ? Player.REPEAT_MODE_ONE : Player.REPEAT_MODE_OFF);
             player.setVolume(muted ? 0f : 1f);
+            if (playbackSpeed > 0f && playbackSpeed != 1.0f) {
+                player.setPlaybackSpeed(playbackSpeed);
+            }
             attachPlayerListeners(player, sessionId);
 
-            player.setMediaSource(hlsMediaSource);
+            player.setMediaSource(mediaSource);
             player.prepare();
             player.setPlayWhenReady(true);
             listener.onExoIsPlayingChanged(true);
@@ -390,6 +419,11 @@ public class FrigateExoPlaybackController {
             @Override
             public void onPlayerError(PlaybackException error) {
                 if (listener.isClosed() || sessionId != listener.getStreamSessionId() || player != exoPlayer) return;
+                if (isHttpNotFoundError(error)) {
+                    stop();
+                    listener.onExoSourceNotFound();
+                    return;
+                }
                 String msg = error != null ? (error.getErrorCodeName() + ": " + error.getMessage()) : "unknown";
                 if (!exoPreferSoftware) {
                     exoPreferSoftware = true;
@@ -549,5 +583,21 @@ public class FrigateExoPlaybackController {
             }
         }
         return out != null ? out : formats;
+    }
+
+    private static boolean isHttpNotFoundError(Throwable error) {
+        Throwable cur = error;
+        int depth = 0;
+        while (cur != null && depth < 12) {
+            if (cur instanceof HttpDataSource.InvalidResponseCodeException) {
+                int code = ((HttpDataSource.InvalidResponseCodeException) cur).responseCode;
+                if (code == 404 || code == 410) {
+                    return true;
+                }
+            }
+            cur = cur.getCause();
+            depth++;
+        }
+        return false;
     }
 }

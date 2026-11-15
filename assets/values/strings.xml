@@ -81,6 +81,7 @@
     <string name="player_error_video_expired_avail">Video recording expired or unavailable for this event.\nAvailable preview:</string>
     <string name="player_error_download_failed">Unable to download clip (%1$s).\nTap to retry.</string>
     <string name="player_error_file_too_small">File too small (%1$d bytes)</string>
+    <string name="player_no_recording">No recording available for this period.\nSelect another date or scrub the timeline.</string>
 
     <string name="event_today_time">Today %1$s</string>
     <string name="event_yesterday_time">Yesterday %1$s</string>
