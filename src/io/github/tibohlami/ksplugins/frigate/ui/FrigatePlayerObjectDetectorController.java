@@ -8,14 +8,20 @@ import android.os.Handler;
 import android.os.Looper;
 import android.view.Gravity;
 import android.view.View;
+import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import me.jxl.kiosk.plugins.KsTheme;
+import me.jxl.kiosk.plugins.PluginHost;
 import io.github.tibohlami.ksplugins.frigate.api.FrigateApiClient;
+import io.github.tibohlami.ksplugins.frigate.api.FrigateEventsWsClient;
 import io.github.tibohlami.ksplugins.frigate.config.FrigateConfig;
 import io.github.tibohlami.ksplugins.frigate.model.FrigateEvent;
 import io.github.tibohlami.ksplugins.frigate.model.ReviewSegment;
 import io.github.tibohlami.ksplugins.frigate.model.TimelineBoxEntry;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -47,9 +53,19 @@ public class FrigatePlayerObjectDetectorController {
         List<ReviewSegment> getTimelineReviews();
         FrigateObjectBoxesOverlayView getObjectBoxesOverlay();
         LinearLayout getHeaderObjectsContainer();
+        View getLiveHighlightView();
+        LinearLayout getLiveOverlayBadgeRow();
+    }
+
+    private static final class ActiveLiveDetection {
+        String id;
+        String label;
+        String severity;
+        double score;
     }
 
     private final Context context;
+    private final PluginHost host;
     private KsTheme theme;
     private final FrigateApiClient apiClient;
     private final FrigateConfig config;
@@ -61,16 +77,30 @@ public class FrigatePlayerObjectDetectorController {
     private final Handler liveObjectsHandler = new Handler(Looper.getMainLooper());
     private boolean liveObjectPollerRunning = false;
     private volatile boolean liveObjectPollInFlight = false;
+    private FrigateEventsWsClient liveWsClient;
+    private final Map<String, ActiveLiveDetection> liveDetectionsById = new LinkedHashMap<>();
+    private final Map<String, String> activeReviewSeverityById = new LinkedHashMap<>();
+    private final Map<String, String> eventSeverityFromReview = new LinkedHashMap<String, String>(64, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<String, String> eldest) {
+            return size() > 200;
+        }
+    };
+    private String lastLiveBadgeKey = "";
+    private String lastLiveBorderKey = "";
+    private Map<String, String> lastOverlaySeverityByLabel = Collections.emptyMap();
     private String lastObjectBadgesKey = "";
     private Map<String, Double> lastActiveLabels = Collections.emptyMap();
 
     public FrigatePlayerObjectDetectorController(Context context,
+                                                 PluginHost host,
                                                  KsTheme theme,
                                                  FrigateApiClient apiClient,
                                                  FrigateConfig config,
                                                  Handler mainHandler,
                                                  HostBridge bridge) {
         this.context = context;
+        this.host = host;
         this.theme = theme;
         this.apiClient = apiClient;
         this.config = config;
@@ -82,8 +112,15 @@ public class FrigatePlayerObjectDetectorController {
         if (theme != null) {
             this.theme = theme;
             lastObjectBadgesKey = "";
+            lastLiveBadgeKey = "";
+            lastLiveBorderKey = "";
             if (lastActiveLabels != null && !lastActiveLabels.isEmpty()) {
                 renderObjectBadges(lastActiveLabels);
+            }
+            if (bridge.isLiveStreamMode()) {
+                renderLiveActivityOverlay();
+            } else if (lastOverlaySeverityByLabel != null && !lastOverlaySeverityByLabel.isEmpty()) {
+                renderOverlayPills(lastOverlaySeverityByLabel);
             }
         }
     }
@@ -182,12 +219,146 @@ public class FrigatePlayerObjectDetectorController {
     public void startLiveObjectPoller() {
         stopLiveObjectPoller();
         liveObjectPollerRunning = true;
+        // Hide header pills in live mode; live detections render as video overlay pills + border.
+        LinearLayout headerContainer = bridge.getHeaderObjectsContainer();
+        if (headerContainer != null) {
+            headerContainer.removeAllViews();
+            headerContainer.setVisibility(View.GONE);
+            lastObjectBadgesKey = "";
+        }
+        startLiveWsClient();
         liveObjectsHandler.post(liveObjectsRunnable);
     }
 
     public void stopLiveObjectPoller() {
         liveObjectPollerRunning = false;
         liveObjectsHandler.removeCallbacksAndMessages(null);
+        stopLiveWsClient();
+        liveDetectionsById.clear();
+        activeReviewSeverityById.clear();
+        eventSeverityFromReview.clear();
+        clearLiveActivityOverlay();
+    }
+
+    private void startLiveWsClient() {
+        stopLiveWsClient();
+        liveWsClient = new FrigateEventsWsClient(config, host, new FrigateEventsWsClient.Listener() {
+            @Override
+            public void onWsConnected() {
+                if (!liveObjectPollerRunning || bridge.isClosed() || !bridge.isLiveStreamMode()) return;
+                pollInProgressEventsOnce();
+            }
+
+            @Override
+            public void onWsDisconnected() {
+                if (!liveObjectPollerRunning || bridge.isClosed() || !bridge.isLiveStreamMode()) return;
+                liveObjectsHandler.removeCallbacks(liveObjectsRunnable);
+                liveObjectsHandler.postDelayed(liveObjectsRunnable, 2500);
+            }
+
+            @Override
+            public void onFrigateEventMessage(String type, JSONObject afterObj, JSONObject beforeObj) {
+                if (!liveObjectPollerRunning || bridge.isClosed() || !bridge.isLiveStreamMode()) return;
+                handleWsEvent(type, afterObj != null ? afterObj : beforeObj);
+            }
+
+            @Override
+            public void onFrigateReviewMessage(String type, JSONObject afterObj, JSONObject beforeObj) {
+                if (!liveObjectPollerRunning || bridge.isClosed() || !bridge.isLiveStreamMode()) return;
+                handleWsReview(type, afterObj != null ? afterObj : beforeObj);
+            }
+        });
+        liveWsClient.start();
+    }
+
+    private void stopLiveWsClient() {
+        if (liveWsClient != null) {
+            try {
+                liveWsClient.close();
+            } catch (Throwable ignored) {}
+            liveWsClient = null;
+        }
+    }
+
+    private void handleWsEvent(String type, JSONObject obj) {
+        if (obj == null) return;
+        String cam = bridge.getCurrentCamera();
+        String evCam = obj.optString("camera", "");
+        if (cam == null || !cam.equals(evCam)) return;
+
+        String id = obj.optString("id", "");
+        if (id.isEmpty()) return;
+
+        boolean ended = "end".equalsIgnoreCase(type)
+                || obj.optBoolean("false_positive", false)
+                || (!obj.isNull("end_time") && obj.optDouble("end_time", 0) > 0);
+        if (ended) {
+            eventSeverityFromReview.remove(id);
+            if (liveDetectionsById.remove(id) != null) {
+                renderLiveActivityOverlay();
+            }
+            return;
+        }
+
+        String label = obj.optString("label", "");
+        if (label.trim().isEmpty()) return;
+        ActiveLiveDetection det = liveDetectionsById.get(id);
+        if (det == null) {
+            det = new ActiveLiveDetection();
+            det.id = id;
+            liveDetectionsById.put(id, det);
+        }
+        det.label = label.trim().toLowerCase(Locale.ROOT);
+        det.score = obj.optDouble("top_score", obj.optDouble("score", 0.0));
+        String sev = obj.optString("severity", "");
+        if (sev.isEmpty()) {
+            sev = eventSeverityFromReview.get(id);
+        }
+        if (sev != null && !sev.isEmpty()) {
+            det.severity = sev;
+        } else if (det.severity == null) {
+            det.severity = "detection";
+        }
+        renderLiveActivityOverlay();
+    }
+
+    private void handleWsReview(String type, JSONObject obj) {
+        if (obj == null) return;
+        String cam = bridge.getCurrentCamera();
+        String revCam = obj.optString("camera", "");
+        if (cam == null || !cam.equals(revCam)) return;
+
+        String revId = obj.optString("id", "");
+        if (revId.isEmpty()) return;
+
+        boolean ended = "end".equalsIgnoreCase(type)
+                || (!obj.isNull("end_time") && obj.optDouble("end_time", 0) > 0);
+        if (ended) {
+            activeReviewSeverityById.remove(revId);
+            renderLiveActivityOverlay();
+            return;
+        }
+
+        String severity = obj.optString("severity", "detection");
+        activeReviewSeverityById.put(revId, severity);
+
+        JSONObject data = obj.optJSONObject("data");
+        if (data != null) {
+            JSONArray detections = data.optJSONArray("detections");
+            if (detections != null) {
+                for (int i = 0; i < detections.length(); i++) {
+                    String evId = detections.optString(i, "");
+                    if (!evId.isEmpty()) {
+                        eventSeverityFromReview.put(evId, severity);
+                        ActiveLiveDetection det = liveDetectionsById.get(evId);
+                        if (det != null) {
+                            det.severity = severity;
+                        }
+                    }
+                }
+            }
+        }
+        renderLiveActivityOverlay();
     }
 
     private final Runnable liveObjectsRunnable = new Runnable() {
@@ -199,39 +370,241 @@ public class FrigatePlayerObjectDetectorController {
                 return;
             }
             if (!bridge.isLiveStreamMode()) return;
-            String cam = bridge.getCurrentCamera();
-            if (!bridge.isLivePaused() && !bridge.isRulerScrubbing() && !liveObjectPollInFlight && cam != null) {
-                liveObjectPollInFlight = true;
-                apiClient.fetchInProgressEvents(cam, new FrigateApiClient.Callback<List<FrigateEvent>>() {
-                    @Override
-                    public void onSuccess(List<FrigateEvent> result) {
-                        liveObjectPollInFlight = false;
-                        liveObjectsHandler.post(() -> {
-                            if (bridge.isClosed() || !bridge.isLiveStreamMode() || bridge.isRulerScrubbing()) return;
-                            updateObjectBadgesFromEvents(result);
-                        });
-                    }
-
-                    @Override
-                    public void onError(Exception error) {
-                        liveObjectPollInFlight = false;
-                    }
-                });
-            }
-            liveObjectsHandler.postDelayed(this, 2500);
+            pollInProgressEventsOnce();
+            long nextDelayMs = (liveWsClient != null && liveWsClient.isConnected()) ? 15000L : 2500L;
+            liveObjectsHandler.postDelayed(this, nextDelayMs);
         }
     };
 
+    private void pollInProgressEventsOnce() {
+        String cam = bridge.getCurrentCamera();
+        if (bridge.isLivePaused() || bridge.isRulerScrubbing() || liveObjectPollInFlight || cam == null) return;
+        liveObjectPollInFlight = true;
+        apiClient.fetchInProgressEvents(cam, new FrigateApiClient.Callback<List<FrigateEvent>>() {
+            @Override
+            public void onSuccess(List<FrigateEvent> result) {
+                liveObjectPollInFlight = false;
+                liveObjectsHandler.post(() -> {
+                    if (bridge.isClosed() || !bridge.isLiveStreamMode() || bridge.isRulerScrubbing()) return;
+                    reconcileInProgressEvents(result);
+                });
+            }
+
+            @Override
+            public void onError(Exception error) {
+                liveObjectPollInFlight = false;
+            }
+        });
+    }
+
+    private void reconcileInProgressEvents(List<FrigateEvent> result) {
+        liveDetectionsById.clear();
+        if (result != null) {
+            for (FrigateEvent ev : result) {
+                if (ev == null || ev.getLabel() == null || ev.getLabel().trim().isEmpty()) continue;
+                String id = ev.getId();
+                if (id == null || id.isEmpty()) {
+                    id = ev.getLabel() + "_" + ev.getStartTime();
+                }
+                ActiveLiveDetection det = new ActiveLiveDetection();
+                det.id = id;
+                det.label = ev.getLabel().trim().toLowerCase(Locale.ROOT);
+                det.score = ev.getTopScore();
+                String sev = ev.getSeverity();
+                if (sev == null || sev.isEmpty()) {
+                    sev = eventSeverityFromReview.get(id);
+                }
+                det.severity = (sev != null && !sev.isEmpty()) ? sev : "detection";
+                liveDetectionsById.put(id, det);
+            }
+        }
+        if (liveDetectionsById.isEmpty()) {
+            activeReviewSeverityById.clear();
+        }
+        renderLiveActivityOverlay();
+    }
+
+    private void clearLiveActivityOverlay() {
+        lastLiveBadgeKey = "";
+        lastLiveBorderKey = "";
+        View highlightView = bridge.getLiveHighlightView();
+        if (highlightView != null && highlightView.getVisibility() != View.GONE) {
+            highlightView.setVisibility(View.GONE);
+        }
+        LinearLayout badgeRow = bridge.getLiveOverlayBadgeRow();
+        if (badgeRow != null) {
+            if (badgeRow.getVisibility() != View.GONE) badgeRow.setVisibility(View.GONE);
+            badgeRow.removeAllViews();
+        }
+    }
+
+    private void renderLiveActivityOverlay() {
+        if (bridge.isClosed() || !bridge.isLiveStreamMode() || bridge.isRulerScrubbing() || bridge.isLivePaused()) {
+            clearLiveActivityOverlay();
+            return;
+        }
+        if (liveDetectionsById.isEmpty()) {
+            clearLiveActivityOverlay();
+            return;
+        }
+
+        boolean hasAlert = false;
+        for (String sev : activeReviewSeverityById.values()) {
+            if ("alert".equalsIgnoreCase(sev)) {
+                hasAlert = true;
+                break;
+            }
+        }
+        if (!hasAlert) {
+            for (ActiveLiveDetection det : liveDetectionsById.values()) {
+                if ("alert".equalsIgnoreCase(det.severity)) {
+                    hasAlert = true;
+                    break;
+                }
+            }
+        }
+
+        View highlightView = bridge.getLiveHighlightView();
+        boolean highlightEnabled = config == null || config.isHighlightOngoingEvents();
+        if (highlightView != null) {
+            if (!highlightEnabled) {
+                if (highlightView.getVisibility() != View.GONE) {
+                    highlightView.setVisibility(View.GONE);
+                }
+                lastLiveBorderKey = "";
+            } else {
+                String borderKey = hasAlert ? "alert" : "detection";
+                if (!borderKey.equals(lastLiveBorderKey) || highlightView.getVisibility() != View.VISIBLE) {
+                    lastLiveBorderKey = borderKey;
+                    int borderAccent = hasAlert ? Color.parseColor("#F43F5E") : Color.parseColor("#F59E0B");
+                    int strokePx = s(3);
+                    GradientDrawable hlBg = new GradientDrawable();
+                    hlBg.setColor(Color.argb(35, Color.red(borderAccent), Color.green(borderAccent), Color.blue(borderAccent)));
+                    hlBg.setCornerRadius(s(12));
+                    hlBg.setStroke(strokePx, borderAccent);
+                    highlightView.setBackground(hlBg);
+                    highlightView.setVisibility(View.VISIBLE);
+                }
+            }
+        }
+
+        Map<String, String> severityByLabel = new LinkedHashMap<>();
+        for (ActiveLiveDetection det : liveDetectionsById.values()) {
+            mergeOverlayLabel(severityByLabel, det.label, det.severity);
+        }
+        renderOverlayPills(severityByLabel);
+    }
+
+    private static void mergeOverlayLabel(Map<String, String> target, String rawLabel, String rawSeverity) {
+        if (rawLabel == null) return;
+        String key = rawLabel.trim().toLowerCase(Locale.ROOT);
+        if (key.isEmpty() || "motion".equals(key)) return;
+        String sev = (rawSeverity != null && !rawSeverity.isEmpty()) ? rawSeverity : "detection";
+        String existing = target.get(key);
+        if (existing == null || ("alert".equalsIgnoreCase(sev) && !"alert".equalsIgnoreCase(existing))) {
+            target.put(key, sev);
+        }
+    }
+
+    private void renderOverlayPills(Map<String, String> severityByLabel) {
+        this.lastOverlaySeverityByLabel = severityByLabel != null ? severityByLabel : Collections.emptyMap();
+        LinearLayout badgeRow = bridge.getLiveOverlayBadgeRow();
+        if (badgeRow == null) return;
+
+        if (severityByLabel == null || severityByLabel.isEmpty()) {
+            badgeRow.removeAllViews();
+            badgeRow.setVisibility(View.GONE);
+            lastLiveBadgeKey = "";
+            return;
+        }
+
+        List<Map.Entry<String, String>> sortedEntries = new ArrayList<>(severityByLabel.entrySet());
+        Collections.sort(sortedEntries, (a, b) -> {
+            boolean aAlert = "alert".equalsIgnoreCase(a.getValue());
+            boolean bAlert = "alert".equalsIgnoreCase(b.getValue());
+            if (aAlert != bAlert) return aAlert ? -1 : 1;
+            return 0;
+        });
+
+        StringBuilder keyBuilder = new StringBuilder();
+        int cap = 0;
+        for (Map.Entry<String, String> item : sortedEntries) {
+            if (cap++ >= 3) break;
+            keyBuilder.append(item.getKey()).append(':').append(item.getValue()).append('|');
+        }
+        String newKey = keyBuilder.toString();
+        if (newKey.equals(lastLiveBadgeKey) && badgeRow.getVisibility() == View.VISIBLE) {
+            return;
+        }
+        lastLiveBadgeKey = newKey;
+
+        badgeRow.removeAllViews();
+        int shown = 0;
+        for (Map.Entry<String, String> item : sortedEntries) {
+            if (shown >= 3) break;
+            String label = item.getKey();
+            boolean isAlert = "alert".equalsIgnoreCase(item.getValue());
+            int pillAccent = isAlert ? Color.parseColor("#F43F5E") : Color.parseColor("#F59E0B");
+
+            FrameLayout pill = new FrameLayout(context);
+            pill.setPadding(s(8), s(6), s(8), s(6));
+
+            GradientDrawable pillBg = new GradientDrawable();
+            int bgTint = Color.argb(230,
+                    (int) (15 * 0.65 + Color.red(pillAccent) * 0.35),
+                    (int) (23 * 0.65 + Color.green(pillAccent) * 0.35),
+                    (int) (42 * 0.65 + Color.blue(pillAccent) * 0.35));
+            pillBg.setColor(bgTint);
+            pillBg.setCornerRadius(s(FrigateTheme.radiusControl(theme)));
+            pillBg.setStroke(s(1.5f), pillAccent);
+            pill.setBackground(pillBg);
+
+            String iconName = FrigateEvent.getMaterialIconForLabel(label);
+            ImageView iconView = new ImageView(context);
+            iconView.setImageDrawable(MaterialIcons.getDrawable(iconName, pillAccent, s(18), theme));
+            iconView.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+            pill.addView(iconView, new FrameLayout.LayoutParams(s(18), s(18), Gravity.CENTER));
+
+            LinearLayout.LayoutParams pLp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            if (shown > 0) {
+                pLp.leftMargin = s(6);
+            }
+            badgeRow.addView(pill, pLp);
+            shown++;
+        }
+        badgeRow.setVisibility(View.VISIBLE);
+    }
+
     public void updateObjectBadgesForEpoch(long epochSeconds) {
-        Map<String, Double> active = new LinkedHashMap<>();
+        Map<String, String> severityByLabel = new LinkedHashMap<>();
         double t = epochSeconds + (config != null ? config.getBboxTimeOffsetSec() : 0.0);
+
+        String overlapReviewSev = null;
+        List<ReviewSegment> revList = bridge.getTimelineReviews();
+        if (revList != null) {
+            for (ReviewSegment rev : revList) {
+                if (rev == null) continue;
+                if (t >= rev.startTime - 1.0 && t <= rev.endTime + 1.0) {
+                    if ("alert".equalsIgnoreCase(rev.severity)) {
+                        overlapReviewSev = "alert";
+                    } else if (overlapReviewSev == null) {
+                        overlapReviewSev = rev.severity;
+                    }
+                }
+            }
+        }
+
         List<FrigateEvent> evList = bridge.getTimelineEvents();
         if (evList != null) {
             for (FrigateEvent ev : evList) {
                 if (ev == null || ev.getLabel() == null || ev.getLabel().isEmpty()) continue;
                 double end = Math.max(ev.getStartTime(), ev.getEndTime());
                 if (t >= ev.getStartTime() - 1.0 && t <= end + 1.0) {
-                    mergeDetectedLabel(active, ev.getLabel(), ev.getTopScore());
+                    String sev = (ev.getSeverity() != null && !ev.getSeverity().isEmpty())
+                            ? ev.getSeverity()
+                            : overlapReviewSev;
+                    mergeOverlayLabel(severityByLabel, ev.getLabel(), sev);
                 }
             }
         }
@@ -240,23 +613,30 @@ public class FrigatePlayerObjectDetectorController {
                 && primaryEvent.getLabel() != null && !primaryEvent.getLabel().isEmpty()) {
             double evEnd = Math.max(primaryEvent.getStartTime(), primaryEvent.getEndTime());
             if (primaryEvent.getStartTime() <= 0 || (t >= primaryEvent.getStartTime() - 1.0 && t <= evEnd + 1.0)) {
-                mergeDetectedLabel(active, primaryEvent.getLabel(), primaryEvent.getTopScore());
+                String sev = (primaryEvent.getSeverity() != null && !primaryEvent.getSeverity().isEmpty())
+                        ? primaryEvent.getSeverity()
+                        : overlapReviewSev;
+                mergeOverlayLabel(severityByLabel, primaryEvent.getLabel(), sev);
             }
         }
-        if (active.isEmpty()) {
-            List<ReviewSegment> revList = bridge.getTimelineReviews();
-            if (revList != null) {
-                for (ReviewSegment rev : revList) {
-                    if (rev == null || rev.objects.isEmpty()) continue;
-                    if (t >= rev.startTime - 1.0 && t <= rev.endTime + 1.0) {
-                        for (String lbl : rev.objects) {
-                            mergeDetectedLabel(active, lbl, 0.0);
-                        }
+        if (severityByLabel.isEmpty() && revList != null) {
+            for (ReviewSegment rev : revList) {
+                if (rev == null || rev.objects.isEmpty()) continue;
+                if (t >= rev.startTime - 1.0 && t <= rev.endTime + 1.0) {
+                    for (String lbl : rev.objects) {
+                        mergeOverlayLabel(severityByLabel, lbl, rev.severity);
                     }
                 }
             }
         }
-        renderObjectBadges(active);
+
+        LinearLayout headerContainer = bridge.getHeaderObjectsContainer();
+        if (headerContainer != null && headerContainer.getVisibility() != View.GONE) {
+            headerContainer.removeAllViews();
+            headerContainer.setVisibility(View.GONE);
+            lastObjectBadgesKey = "";
+        }
+        renderOverlayPills(severityByLabel);
     }
 
     public void updateObjectBadgesFromEvents(List<FrigateEvent> events) {

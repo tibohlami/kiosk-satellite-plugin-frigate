@@ -60,6 +60,8 @@ public class FrigatePlayerOverlay {
     private final Runnable onClose;
 
     private FrameLayout videoContainerRef;
+    private View liveHighlightView;
+    private LinearLayout liveOverlayBadgeRow;
     private TextView timelineDateBtn;
     private FrameLayout rulerWrapper;
     private FrigateTimelineRulerView timelineRuler;
@@ -171,7 +173,7 @@ public class FrigatePlayerOverlay {
         this.calendarModal = new FrigateCalendarModal(context, theme, config, dayKeyFmt);
 
         this.objectDetectorController = new FrigatePlayerObjectDetectorController(
-                context, theme, apiClient, config, progressHandler,
+                context, host, theme, apiClient, config, progressHandler,
                 new FrigatePlayerObjectDetectorController.HostBridge() {
                     @Override public boolean isClosed() { return isClosed; }
                     @Override public boolean isOverlayVisible() { return FrigatePlayerOverlay.this.isOverlayVisible(); }
@@ -187,6 +189,8 @@ public class FrigatePlayerOverlay {
                     @Override public List<ReviewSegment> getTimelineReviews() { return timelineController.getTimelineReviews(); }
                     @Override public FrigateObjectBoxesOverlayView getObjectBoxesOverlay() { return objectBoxesOverlay; }
                     @Override public LinearLayout getHeaderObjectsContainer() { return headerObjectsContainer; }
+                    @Override public View getLiveHighlightView() { return liveHighlightView; }
+                    @Override public LinearLayout getLiveOverlayBadgeRow() { return liveOverlayBadgeRow; }
                 });
 
         if (!isLiveStreamMode && event.getStartTime() > 0) {
@@ -1221,6 +1225,27 @@ public class FrigatePlayerOverlay {
         objectBoxesOverlay.setVisibility((!isLiveStreamMode && showObjectBoxes) ? View.VISIBLE : View.GONE);
         videoContainer.addView(objectBoxesOverlay, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+
+        // 4c-bis. Live camera activity border highlight + overlay object pills (matching home screen)
+        liveHighlightView = new View(context);
+        liveHighlightView.setVisibility(View.GONE);
+        liveHighlightView.setClickable(false);
+        liveHighlightView.setFocusable(false);
+        videoContainer.addView(liveHighlightView, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+
+        liveOverlayBadgeRow = new LinearLayout(context);
+        liveOverlayBadgeRow.setOrientation(LinearLayout.HORIZONTAL);
+        liveOverlayBadgeRow.setGravity(Gravity.CENTER_VERTICAL);
+        liveOverlayBadgeRow.setVisibility(View.GONE);
+        liveOverlayBadgeRow.setClickable(false);
+        liveOverlayBadgeRow.setFocusable(false);
+        FrameLayout.LayoutParams liveBadgeLp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
+        liveBadgeLp.gravity = Gravity.TOP | Gravity.LEFT;
+        int liveBadgeMargin = s(12);
+        liveBadgeLp.setMargins(liveBadgeMargin, liveBadgeMargin, 0, 0);
+        videoContainer.addView(liveOverlayBadgeRow, liveBadgeLp);
 
         // 4d. Scrubbing timestamp HUD pill over preview
         scrubHudPill = new TextView(context);
@@ -2936,6 +2961,7 @@ public class FrigatePlayerOverlay {
                     stopMjpegConnectionOnly();
                 }
                 isPlaying = false;
+                stopLiveObjectPoller();
                 hideLiveFpsBadge();
                 updatePlayPauseIcon();
             } else {
