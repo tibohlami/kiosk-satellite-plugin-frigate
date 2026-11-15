@@ -12,6 +12,7 @@ import io.github.tibohlami.ksplugins.frigate.config.FrigateConfig;
 import me.jxl.kiosk.plugins.PluginHost;
 import io.github.tibohlami.ksplugins.frigate.model.DaySummary;
 import io.github.tibohlami.ksplugins.frigate.model.FrigateEvent;
+import io.github.tibohlami.ksplugins.frigate.model.PreviewSegment;
 import io.github.tibohlami.ksplugins.frigate.model.RecordingSegment;
 import io.github.tibohlami.ksplugins.frigate.model.ReviewSegment;
 
@@ -68,6 +69,7 @@ public class FrigatePlayerTimelineController {
     private final List<long[]> loadedTimelineRanges = new ArrayList<>();
     private final List<RecordingSegment> allRecordingSegments = new ArrayList<>();
     private final List<ReviewSegment> allReviewSegments = new ArrayList<>();
+    private final List<PreviewSegment> allPreviewSegments = new ArrayList<>();
     private final Map<String, FrigateEvent> timelineEventMap = new LinkedHashMap<>();
 
     private volatile List<FrigateEvent> timelineEvents = Collections.emptyList();
@@ -428,6 +430,22 @@ public class FrigatePlayerTimelineController {
                 });
             }
         });
+
+        apiClient.fetchPreviews(camera, chunkAfter, chunkBefore, new FrigateApiClient.Callback<List<PreviewSegment>>() {
+            @Override
+            public void onSuccess(List<PreviewSegment> result) {
+                mainHandler.post(() -> {
+                    if (!listener.isClosed()) {
+                        mergePreviewSegments(result);
+                    }
+                });
+            }
+
+            @Override
+            public void onError(Exception error) {
+                // Non-fatal: older Frigate (< 0.14) or unfinalized hours fall back to snapshot.jpg
+            }
+        });
     }
 
     private long[] findNextUncoveredChunk(long targetStart, long targetEnd, long now) {
@@ -565,6 +583,37 @@ public class FrigatePlayerTimelineController {
         }
         timelineEvents = new ArrayList<>(timelineEventMap.values());
         listener.onTimelineEventsUpdated(timelineEvents);
+    }
+
+    private void mergePreviewSegments(List<PreviewSegment> incoming) {
+        if (incoming == null || incoming.isEmpty()) return;
+        for (PreviewSegment seg : incoming) {
+            if (seg == null || seg.src == null || seg.src.isEmpty() || seg.end <= seg.start) continue;
+            boolean exists = false;
+            for (int i = 0; i < allPreviewSegments.size(); i++) {
+                PreviewSegment existing = allPreviewSegments.get(i);
+                if (seg.src.equals(existing.src)
+                        || (Math.abs(existing.start - seg.start) < 1.0 && Math.abs(existing.end - seg.end) < 1.0)) {
+                    allPreviewSegments.set(i, seg);
+                    exists = true;
+                    break;
+                }
+            }
+            if (!exists) {
+                allPreviewSegments.add(seg);
+            }
+        }
+        Collections.sort(allPreviewSegments, Comparator.comparingDouble(p -> p.start));
+    }
+
+    public PreviewSegment findPreviewSegmentAtEpoch(long epochSeconds) {
+        double target = (double) epochSeconds;
+        for (PreviewSegment seg : allPreviewSegments) {
+            if (target >= seg.start && target <= seg.end) {
+                return seg;
+            }
+        }
+        return null;
     }
 
     public void requestScrubSnapshot(long epochSeconds) {

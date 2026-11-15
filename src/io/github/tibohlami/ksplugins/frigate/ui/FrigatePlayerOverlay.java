@@ -10,6 +10,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.view.Gravity;
 import android.view.MotionEvent;
+import android.view.TextureView;
 import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
@@ -67,6 +68,8 @@ public class FrigatePlayerOverlay {
     private String selectedDayKey = "all";
     private long[] pendingCalendarJumpBounds = null;
     private ImageView scrubPreviewView;
+    private TextureView scrubPreviewTextureView;
+    private FrigateScrubPreviewPlayerController scrubPreviewPlayerController;
     private TextView scrubHudPill;
     private volatile boolean isRulerScrubbing = false;
     private final FrigatePlayerTimelineController timelineController;
@@ -1181,13 +1184,35 @@ public class FrigatePlayerOverlay {
         videoContainer.addView(fallbackImageView, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
-        // 4b. Real-time low-res snapshot preview displayed while scrubbing vertical timeline
+        // 4b. Real-time low-res snapshot & preview MP4 surfaces displayed while scrubbing vertical timeline
         scrubPreviewView = new ImageView(context);
         scrubPreviewView.setScaleType(ImageView.ScaleType.FIT_CENTER);
         scrubPreviewView.setBackgroundColor(Color.TRANSPARENT);
         scrubPreviewView.setVisibility(View.GONE);
         videoContainer.addView(scrubPreviewView, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+
+        scrubPreviewTextureView = new TextureView(context);
+        scrubPreviewTextureView.setVisibility(View.GONE);
+        videoContainer.addView(scrubPreviewTextureView, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT, Gravity.CENTER));
+        scrubPreviewPlayerController = new FrigateScrubPreviewPlayerController(
+                context, host, config, apiClient, scrubPreviewTextureView,
+                new FrigateScrubPreviewPlayerController.Listener() {
+                    @Override
+                    public void onScrubVideoFrameReady() {
+                        if (scrubPreviewView != null) {
+                            scrubPreviewView.setVisibility(View.GONE);
+                        }
+                    }
+
+                    @Override
+                    public void onScrubVideoFallbackNeeded(long epochSeconds) {
+                        if (!isClosed && isRulerScrubbing) {
+                            timelineController.requestScrubSnapshot(epochSeconds);
+                        }
+                    }
+                });
 
         // 4c. Historical object bounding boxes overlay (interpolated along trajectory)
         objectBoxesOverlay = new FrigateObjectBoxesOverlayView(context);
@@ -2310,14 +2335,26 @@ public class FrigatePlayerOverlay {
             } catch (Exception ignored) {}
         }
         updateScrubHud(epochSeconds);
-        timelineController.requestScrubSnapshot(epochSeconds);
+        requestScrubPreview(epochSeconds);
     }
 
     private void onRulerScrubChanged(long epochSeconds) {
         syncSelectedDayWithEpoch(epochSeconds);
         updateObjectBadgesForEpoch(epochSeconds);
         updateScrubHud(epochSeconds);
-        timelineController.requestScrubSnapshot(epochSeconds);
+        requestScrubPreview(epochSeconds);
+    }
+
+    private void requestScrubPreview(long epochSeconds) {
+        PreviewSegment seg = timelineController.findPreviewSegmentAtEpoch(epochSeconds);
+        if (seg != null && scrubPreviewPlayerController != null) {
+            scrubPreviewPlayerController.seekToEpoch(seg, epochSeconds);
+        } else {
+            if (scrubPreviewPlayerController != null) {
+                scrubPreviewPlayerController.hide();
+            }
+            timelineController.requestScrubSnapshot(epochSeconds);
+        }
     }
 
     private void onRulerScrubEnd(long epochSeconds) {
@@ -2354,6 +2391,9 @@ public class FrigatePlayerOverlay {
         }
         if (scrubPreviewView != null && !isRulerScrubbing) {
             scrubPreviewView.setVisibility(View.GONE);
+        }
+        if (scrubPreviewPlayerController != null && !isRulerScrubbing) {
+            scrubPreviewPlayerController.hide();
         }
         if (!isRulerScrubbing) {
             updateObjectBoxesOverlayVisibility();
@@ -3177,6 +3217,9 @@ public class FrigatePlayerOverlay {
         webStreamController.destroy();
         clipCacheManager.destroy();
         timelineController.destroy();
+        if (scrubPreviewPlayerController != null) {
+            scrubPreviewPlayerController.release();
+        }
         if (videoView != null) {
             try {
                 videoView.stopPlayback();
