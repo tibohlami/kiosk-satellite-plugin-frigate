@@ -1010,10 +1010,11 @@ public class FrigateExplorerOverlay {
             }
             boolean isAlert = "alert".equalsIgnoreCase(recentSeverityMap.get(evId));
             int accent = isAlert ? Color.parseColor("#F43F5E") : Color.parseColor("#F59E0B");
+            int strokePx = s(3);
             GradientDrawable hlBg = new GradientDrawable();
             hlBg.setColor(Color.argb(38, Color.red(accent), Color.green(accent), Color.blue(accent)));
-            hlBg.setCornerRadius(s(FrigateTheme.radiusControl(theme)));
-            hlBg.setStroke(s(3), accent);
+            hlBg.setCornerRadius(Math.max(0f, s(FrigateTheme.radiusControl(theme)) - (strokePx / 2f)));
+            hlBg.setStroke(strokePx, accent);
             overlay.setBackground(hlBg);
             overlay.setVisibility(View.VISIBLE);
         }
@@ -1410,10 +1411,11 @@ public class FrigateExplorerOverlay {
             int borderAccent = hasAlert ? Color.parseColor("#F43F5E") : Color.parseColor("#F59E0B");
 
             if (highlightView != null) {
+                int strokePx = s(3);
                 GradientDrawable hlBg = new GradientDrawable();
                 hlBg.setColor(Color.argb(35, Color.red(borderAccent), Color.green(borderAccent), Color.blue(borderAccent)));
-                hlBg.setCornerRadius(s(FrigateTheme.radiusRow(theme)));
-                hlBg.setStroke(s(3), borderAccent);
+                hlBg.setCornerRadius(Math.max(0f, s(FrigateTheme.radiusRow(theme)) - (strokePx / 2f)));
+                hlBg.setStroke(strokePx, borderAccent);
                 highlightView.setBackground(hlBg);
                 highlightView.setVisibility(View.VISIBLE);
             }

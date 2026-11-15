@@ -1423,10 +1423,11 @@ public class FrigateEventsBrowserView {
             }
             boolean isAlert = "alert".equalsIgnoreCase(cardSeverityMap.get(evId));
             int accent = isAlert ? Color.parseColor("#F43F5E") : Color.parseColor("#F59E0B");
+            int strokePx = s(3);
             GradientDrawable hlBg = new GradientDrawable();
             hlBg.setColor(Color.argb(38, Color.red(accent), Color.green(accent), Color.blue(accent)));
-            hlBg.setCornerRadius(s(12));
-            hlBg.setStroke(s(3), accent);
+            hlBg.setCornerRadius(Math.max(0f, s(FrigateTheme.radiusControl(theme)) - (strokePx / 2f)));
+            hlBg.setStroke(strokePx, accent);
             overlay.setBackground(hlBg);
             overlay.setVisibility(View.VISIBLE);
         }
