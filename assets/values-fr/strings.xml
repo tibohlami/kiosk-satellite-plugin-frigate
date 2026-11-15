@@ -81,6 +81,7 @@
     <string name="player_error_video_expired_avail">Enregistrement vidéo expiré ou indisponible pour cet événement.\nAperçu disponible :</string>
     <string name="player_error_download_failed">Impossible de télécharger le clip (%1$s).\nAppuyez pour réessayer.</string>
     <string name="player_error_file_too_small">Fichier trop court (%1$d octets)</string>
+    <string name="player_no_recording">Aucun enregistrement disponible pour cette période.\nSélectionnez une autre date ou déplacez le curseur.</string>
 
     <string name="event_today_time">Aujourd\'hui %1$s</string>
     <string name="event_yesterday_time">Hier %1$s</string>

@@ -23,12 +23,16 @@ import me.jxl.kiosk.plugins.KsTheme;
 import io.github.tibohlami.ksplugins.frigate.api.FrigateApiClient;
 import io.github.tibohlami.ksplugins.frigate.config.FrigateConfig;
 import io.github.tibohlami.ksplugins.frigate.model.FrigateEvent;
+import io.github.tibohlami.ksplugins.frigate.model.PreviewSegment;
 import io.github.tibohlami.ksplugins.frigate.model.RecordingSegment;
 import io.github.tibohlami.ksplugins.frigate.model.ReviewSegment;
 import io.github.tibohlami.ksplugins.frigate.model.TimelineBoxEntry;
 
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.Collections;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -55,8 +59,13 @@ public class FrigatePlayerOverlay {
     private final Runnable onClose;
 
     private FrameLayout videoContainerRef;
+    private TextView timelineDateBtn;
     private FrameLayout rulerWrapper;
     private FrigateTimelineRulerView timelineRuler;
+    private final SimpleDateFormat dayKeyFmt = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
+    private final FrigateCalendarModal calendarModal;
+    private String selectedDayKey = "all";
+    private long[] pendingCalendarJumpBounds = null;
     private ImageView scrubPreviewView;
     private TextView scrubHudPill;
     private volatile boolean isRulerScrubbing = false;
@@ -116,6 +125,11 @@ public class FrigatePlayerOverlay {
     private boolean isPlaying = false;
     private boolean isTimelineMode = false;
     private boolean isHistoryMode = false;
+    private boolean isNoRecordingError = false;
+    private String activePreviewFallbackUrl = null;
+    private FrigateEvent activePreviewEvent = null;
+    private long activePreviewClipStartMs = 0L;
+    private long activePreviewClipEndMs = C.TIME_END_OF_SOURCE;
     private volatile boolean isExoPlayback = false;
     private volatile boolean exoFallbackTriggered = false;
     private FrameLayout rootLayout;
@@ -152,6 +166,7 @@ public class FrigatePlayerOverlay {
         this.isLiveStreamMode = (event == null || event.getId() == null || event.getId().trim().isEmpty());
         this.showObjectBoxes = config != null && config.isShowObjectBoxesByDefault();
         this.isMuted = config != null && config.isMuteAudioByDefault();
+        this.calendarModal = new FrigateCalendarModal(context, theme, config, dayKeyFmt);
 
         this.objectDetectorController = new FrigatePlayerObjectDetectorController(
                 context, theme, apiClient, config, progressHandler,
@@ -217,6 +232,7 @@ public class FrigatePlayerOverlay {
                         if (timelineRuler == null) return;
                         timelineRuler.setTimeRange(0L, maxEpochHint);
                         timelineRuler.setRecordings(segments);
+                        tryFinishPendingCalendarJump();
                     }
 
                     @Override
@@ -572,14 +588,35 @@ public class FrigatePlayerOverlay {
                     @Override
                     public void onExoRetryWithSoftwareDecoder(String errorMsg) {
                         isExoPlayback = false;
-                        loadVideo();
+                        if (activePreviewFallbackUrl != null) {
+                            exoController.startPreview(++streamSessionId, activePreviewFallbackUrl,
+                                    activePreviewClipStartMs, activePreviewClipEndMs, 8.0f);
+                        } else {
+                            loadVideo();
+                        }
                     }
 
                     @Override
                     public void onExoFallbackToHls(String errorMsg) {
                         isExoPlayback = false;
                         exoFallbackTriggered = true;
-                        loadVideo();
+                        if (activePreviewFallbackUrl != null) {
+                            long targetEpoch = timelineRuler != null ? timelineRuler.getCursorEpoch() : timelineStartEpoch;
+                            showExpiredEventSnapshotFallback(activePreviewEvent, targetEpoch);
+                        } else {
+                            loadVideo();
+                        }
+                    }
+
+                    @Override
+                    public void onExoSourceNotFound() {
+                        isExoPlayback = false;
+                        long targetEpoch = timelineRuler != null ? timelineRuler.getCursorEpoch() : timelineStartEpoch;
+                        if (activePreviewFallbackUrl != null) {
+                            showExpiredEventSnapshotFallback(activePreviewEvent, targetEpoch);
+                        } else {
+                            showEventPreviewOrNoRecording(targetEpoch);
+                        }
                     }
                 });
         this.clipCacheManager = new FrigateClipCacheManager(context, host, config, progressHandler,
@@ -852,6 +889,13 @@ public class FrigatePlayerOverlay {
         }
         if (timelineRuler != null) {
             timelineRuler.setTheme(newTheme);
+        }
+        if (calendarModal != null) {
+            calendarModal.onThemeChanged(newTheme);
+        }
+        if (timelineDateBtn != null) {
+            long cursor = (timelineRuler != null) ? timelineRuler.getCursorEpoch() : (System.currentTimeMillis() / 1000L);
+            updateTimelineDateHeader(cursor);
         }
         if (rulerWrapper != null) {
             updateRulerWrapperTheme();
@@ -1184,7 +1228,9 @@ public class FrigatePlayerOverlay {
         errLp.setMargins(m, m, m, m);
         errorText.setLayoutParams(errLp);
         errorText.setOnClickListener(v -> {
-            if (isLiveStreamMode) {
+            if (isNoRecordingError) {
+                openCalendarModal();
+            } else if (isLiveStreamMode) {
                 startLiveStream();
             } else {
                 exoController.resetSoftwareDecoderPreference();
@@ -1756,6 +1802,20 @@ public class FrigatePlayerOverlay {
         LinearLayout panel = new LinearLayout(context);
         panel.setOrientation(LinearLayout.VERTICAL);
 
+        // Always visible current date header at the top of the timeline ruler, clickable to pick a day
+        timelineDateBtn = new TextView(context);
+        timelineDateBtn.setGravity(Gravity.CENTER);
+        timelineDateBtn.setSingleLine(true);
+        timelineDateBtn.setTextSize(sp(12));
+        timelineDateBtn.setTextColor(FrigateTheme.onSurface(theme));
+        timelineDateBtn.setTypeface(FrigateTheme.typeface(theme, 600));
+        timelineDateBtn.setPadding(s(6), s(6), s(6), s(6));
+        timelineDateBtn.setOnClickListener(v -> openCalendarModal());
+        LinearLayout.LayoutParams dateLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        dateLp.bottomMargin = s(6);
+        panel.addView(timelineDateBtn, dateLp);
+
         rulerWrapper = new FrameLayout(context);
         updateRulerWrapperTheme();
         rulerWrapper.setClipToOutline(true);
@@ -1769,6 +1829,7 @@ public class FrigatePlayerOverlay {
                 ? now
                 : ((event != null && event.getStartTime() > 0) ? (long) event.getStartTime() : timelineStartEpoch);
         timelineRuler.setCursorEpoch(initCursor, isLiveStreamMode);
+        updateTimelineDateHeader(initCursor);
         timelineRuler.setOnScrubListener(new FrigateTimelineRulerView.OnScrubListener() {
             @Override
             public void onScrubStart(long epochSeconds) {
@@ -1846,8 +1907,398 @@ public class FrigatePlayerOverlay {
         btn.setBackground(bg);
     }
 
+    private void updateTimelineDateHeader(long epochSeconds) {
+        if (timelineDateBtn == null) return;
+        boolean hasExplicitDay = selectedDayKey != null && !"all".equals(selectedDayKey);
+        String label;
+        if (hasExplicitDay) {
+            long[] bounds = getDayBounds(selectedDayKey);
+            long refMs = (bounds != null) ? (bounds[0] * 1000L) : System.currentTimeMillis();
+            label = FrigateDateTimeUtils.formatShortNumericDate(context, config, refMs);
+        } else {
+            long tsSec = (epochSeconds > 0L) ? epochSeconds : (System.currentTimeMillis() / 1000L);
+            label = FrigateDateTimeUtils.formatShortNumericDate(context, config, tsSec * 1000L);
+        }
+        timelineDateBtn.setText(label);
+        GradientDrawable bg = new GradientDrawable();
+        int calBg = hasExplicitDay ? FrigateTheme.primary(theme) : FrigateTheme.surfaceContainerHigh(theme);
+        bg.setColor(calBg);
+        bg.setCornerRadius(s(FrigateTheme.radiusControl(theme)));
+        bg.setStroke(s(1), hasExplicitDay ? calBg : FrigateTheme.outlineVariant(theme));
+        timelineDateBtn.setBackground(bg);
+        int calText = hasExplicitDay ? FrigateTheme.onPrimary(theme) : FrigateTheme.onSurface(theme);
+        timelineDateBtn.setTextColor(calText);
+        MaterialIcons.setIconOnTextView(
+                timelineDateBtn, MaterialIcons.CALENDAR,
+                calText,
+                s(13), s(5), theme);
+    }
+
+    private void openCalendarModal() {
+        if (rootLayout == null || isClosed) return;
+        long cursorEpoch = (timelineRuler != null)
+                ? timelineRuler.getCursorEpoch()
+                : (System.currentTimeMillis() / 1000L);
+        Map<String, Integer> dayCounts = timelineController.getDayCountsForCurrentCamera();
+        calendarModal.show(rootLayout, selectedDayKey, cursorEpoch, dayCounts,
+                tr("common_live"), this::onCalendarDaySelected);
+    }
+
+    private void onCalendarDaySelected(String dayKey) {
+        if (isClosed) return;
+        String normalized = (dayKey == null || dayKey.trim().isEmpty()) ? "all" : dayKey.trim();
+        if ("all".equals(normalized)) {
+            pendingCalendarJumpBounds = null;
+            selectedDayKey = "all";
+            startLiveStream();
+            return;
+        }
+        long[] bounds = getDayBounds(normalized);
+        if (bounds == null) return;
+        long now = System.currentTimeMillis() / 1000L;
+        long dayStart = bounds[0];
+        long dayEnd = Math.min(now, bounds[1]);
+        if (dayEnd <= dayStart) {
+            dayEnd = dayStart + 60L;
+        }
+
+        selectedDayKey = normalized;
+        updateTimelineDateHeader(dayStart);
+
+        if (timelineController.isRangeLoaded(dayStart, dayEnd)) {
+            pendingCalendarJumpBounds = null;
+            jumpToSelectedDayStart(dayStart, dayEnd);
+        } else {
+            pendingCalendarJumpBounds = new long[]{dayStart, dayEnd};
+            if (timelineRuler != null) {
+                timelineRuler.setCursorEpoch(dayStart, false);
+            }
+            timelineController.ensureTimelineCoverage(dayStart, dayEnd);
+        }
+    }
+
+    private void tryFinishPendingCalendarJump() {
+        long[] bounds = pendingCalendarJumpBounds;
+        if (bounds == null || isClosed || isRulerScrubbing) return;
+        long dayStart = bounds[0];
+        long dayEnd = bounds[1];
+        long firstRec = timelineController.findFirstRecordingEpochInRange(dayStart, dayEnd);
+        if (firstRec >= 0L || timelineController.isRangeLoaded(dayStart, dayEnd)) {
+            pendingCalendarJumpBounds = null;
+            jumpToSelectedDayStart(dayStart, dayEnd);
+        }
+    }
+
+    private void jumpToSelectedDayStart(long dayStart, long dayEnd) {
+        long now = System.currentTimeMillis() / 1000L;
+        long firstRec = timelineController.findFirstRecordingEpochInRange(dayStart, dayEnd);
+        if (firstRec >= 0L) {
+            long targetEpoch = firstRec;
+            if (targetEpoch >= now - 4L) {
+                selectedDayKey = "all";
+                startLiveStream();
+                return;
+            }
+            long windowSeconds = Math.max(30L, Math.min(1800L, Math.min(now, dayEnd) - targetEpoch));
+            if (timelineRuler != null) {
+                timelineRuler.setCursorEpoch(targetEpoch, false);
+            }
+            switchToRecordedMode(targetEpoch, windowSeconds);
+            return;
+        }
+        long firstEvEpoch = timelineController.findFirstEventOrReviewEpochInRange(dayStart, dayEnd);
+        if (firstEvEpoch >= 0L) {
+            showEventPreviewOrNoRecording(firstEvEpoch);
+            return;
+        }
+        showNoRecordingState(dayStart);
+    }
+
+    private void showEventPreviewOrNoRecording(long epochSeconds) {
+        FrigateEvent ev = timelineController.findEventAtOrNearEpoch(epochSeconds);
+        ReviewSegment rev = (ev == null) ? timelineController.findReviewAtOrNearEpoch(epochSeconds) : null;
+        if (ev == null && rev == null) {
+            showNoRecordingState(epochSeconds);
+            return;
+        }
+
+        long targetEpoch = epochSeconds;
+        long endEpoch = epochSeconds + 15L;
+        String previewUrl = null;
+        String snapshotUrl = null;
+        if (ev != null) {
+            if (ev.getStartTime() > 0) {
+                targetEpoch = (long) Math.floor(ev.getStartTime());
+                endEpoch = (ev.getEndTime() > ev.getStartTime())
+                        ? (long) Math.ceil(ev.getEndTime())
+                        : (targetEpoch + 15L);
+            }
+            previewUrl = apiClient.getEventPreviewClipUrl(ev);
+            if (ev.getId() != null && !ev.getId().isEmpty() && !ev.isReviewFallback()) {
+                snapshotUrl = ev.hasSnapshot()
+                        ? apiClient.getSnapshotUrl(ev.getId())
+                        : ev.getEffectiveThumbnailUrl(apiClient.getThumbnailUrl(ev.getId()));
+            } else {
+                snapshotUrl = ev.getEffectiveThumbnailUrl(null);
+            }
+        } else {
+            if (rev.startTime > 0) {
+                targetEpoch = (long) Math.floor(rev.startTime);
+                endEpoch = (rev.endTime > rev.startTime)
+                        ? (long) Math.ceil(rev.endTime)
+                        : (targetEpoch + 15L);
+            }
+            previewUrl = (rev.id != null && !rev.id.isEmpty())
+                    ? apiClient.getReviewPreviewUrl(rev.id)
+                    : apiClient.getCameraPreviewMp4Url(currentCamera, targetEpoch, endEpoch);
+            snapshotUrl = apiClient.getReviewThumbnailUrl(rev);
+        }
+
+        stopAllLiveStreams();
+        final int sessionId = ++streamSessionId;
+        stopExoPlayer();
+        stopProgressUpdater();
+        if (videoView != null) {
+            try {
+                videoView.stopPlayback();
+            } catch (Exception ignored) {}
+            videoView.setVisibility(View.GONE);
+        }
+        if (liveImageView != null) liveImageView.setVisibility(View.GONE);
+        if (scrubPreviewView != null) scrubPreviewView.setVisibility(View.GONE);
+        if (scrubHudPill != null) scrubHudPill.setVisibility(View.GONE);
+        if (liveBadge != null) liveBadge.setVisibility(View.GONE);
+        if (muteBtn != null) muteBtn.setVisibility(View.GONE);
+
+        isLiveStreamMode = false;
+        isLivePaused = false;
+        isTimelineMode = true;
+        isHistoryMode = true;
+        isNoRecordingError = false;
+        isExoPlayback = false;
+        exoFallbackTriggered = false;
+        isHlsPlayback = false;
+        hlsFallbackTriggered = false;
+        activePreviewFallbackUrl = previewUrl;
+        activePreviewEvent = ev;
+
+        long durationSec = Math.max(10L, endEpoch - targetEpoch);
+        timelineStartEpoch = targetEpoch;
+        timelineDurationSeconds = durationSec;
+        eventTotalDurationMs = (int) (durationSec * 1000L);
+
+        if (headerTimeView != null) {
+            headerTimeView.setText(FrigateDateTimeUtils.formatWeekdayDateTime(context, config, targetEpoch * 1000L));
+        }
+        if (timelineRuler != null) {
+            timelineRuler.setCursorEpoch(targetEpoch, false);
+        }
+        syncSelectedDayWithEpoch(targetEpoch);
+        updateObjectBadgesForEpoch(targetEpoch);
+        updateLoopButtonVisibility();
+        updateBboxButtonVisibility();
+        updateSeekBarVisibility();
+        setActiveVideoDimensions(0, 0, 1.0f);
+        updateObjectBoxesOverlayVisibility();
+        if (seekBar != null) {
+            seekBar.setEnabled(true);
+            seekBar.setMax(eventTotalDurationMs);
+            seekBar.setProgress(0);
+        }
+        if (timeCurrentText != null) timeCurrentText.setText("00:00");
+        if (timeDurationText != null) timeDurationText.setText(formatDuration(eventTotalDurationMs));
+
+        if (snapshotUrl != null && !snapshotUrl.isEmpty() && fallbackImageView != null) {
+            imageLoader.load(snapshotUrl, fallbackImageView);
+            fallbackImageView.setVisibility(View.VISIBLE);
+        }
+
+        if (currentCamera != null && !currentCamera.isEmpty() && exoController.hasTextureView()) {
+            if (progressBar != null) progressBar.setVisibility(View.VISIBLE);
+            if (errorText != null) errorText.setVisibility(View.GONE);
+            updateTransportModeBadge(tr("common_preview_badge"), "#38BDF8", "#0C2135", "#0284C7");
+            final long fTargetEpoch = targetEpoch;
+            final long fEndEpoch = endEpoch;
+            final FrigateEvent fEv = ev;
+            apiClient.fetchPreviews(currentCamera, Math.max(0L, fTargetEpoch - 3600L), fEndEpoch + 3600L,
+                    new FrigateApiClient.Callback<List<PreviewSegment>>() {
+                        @Override
+                        public void onSuccess(List<PreviewSegment> previews) {
+                            progressHandler.post(() -> {
+                                if (isClosed || sessionId != streamSessionId) return;
+                                PreviewSegment best = selectBestPreviewSegment(previews, fTargetEpoch, fEndEpoch);
+                                if (best == null) {
+                                    showExpiredEventSnapshotFallback(fEv, fTargetEpoch);
+                                    return;
+                                }
+                                String staticUrl = apiClient.getStaticPreviewUrl(best.src);
+                                if (staticUrl == null || staticUrl.isEmpty()) {
+                                    showExpiredEventSnapshotFallback(fEv, fTargetEpoch);
+                                    return;
+                                }
+                                long clipStartMs = Math.max(0L, Math.round((fTargetEpoch - best.start - 4.0) * 1000.0));
+                                long maxPreviewMs = Math.max(1000L, Math.round((best.end - best.start) * 1000.0));
+                                long clipEndMs = Math.min(maxPreviewMs,
+                                        Math.max(clipStartMs + 10000L, Math.round((fEndEpoch - best.start + 4.0) * 1000.0)));
+                                activePreviewFallbackUrl = staticUrl;
+                                activePreviewClipStartMs = clipStartMs;
+                                activePreviewClipEndMs = clipEndMs;
+                                android.util.Log.i("FrigatePlugin", "Streaming ExoPlayer static preview MP4: " + staticUrl
+                                        + " [" + clipStartMs + "ms.." + clipEndMs + "ms]");
+                                exoController.startPreview(sessionId, staticUrl, clipStartMs, clipEndMs, 8.0f);
+                            });
+                        }
+
+                        @Override
+                        public void onError(Exception error) {
+                            progressHandler.post(() -> {
+                                if (isClosed || sessionId != streamSessionId) return;
+                                showExpiredEventSnapshotFallback(fEv, fTargetEpoch);
+                            });
+                        }
+                    });
+        } else {
+            showExpiredEventSnapshotFallback(ev, targetEpoch);
+        }
+    }
+
+    private static PreviewSegment selectBestPreviewSegment(List<PreviewSegment> previews, long startEpoch, long endEpoch) {
+        if (previews == null || previews.isEmpty()) return null;
+        PreviewSegment best = null;
+        double bestOverlap = -1.0;
+        for (PreviewSegment p : previews) {
+            if (p == null || p.src.isEmpty()) continue;
+            double overlap = Math.min(p.end, (double) endEpoch) - Math.max(p.start, (double) startEpoch);
+            if (overlap > bestOverlap) {
+                bestOverlap = overlap;
+                best = p;
+            }
+        }
+        return bestOverlap > 0.0 ? best : null;
+    }
+
+    private void showExpiredEventSnapshotFallback(FrigateEvent ev, long epochSeconds) {
+        activePreviewFallbackUrl = null;
+        if (progressBar != null) progressBar.setVisibility(View.GONE);
+        stopProgressUpdater();
+        isPlaying = false;
+        updatePlayPauseIcon();
+        updateTransportModeBadge(tr("common_preview_badge"), "#94A3B8", "#161D2B", "#334155");
+        if (errorText != null) {
+            errorText.setText(tr("player_error_video_expired_kept"));
+            errorText.setVisibility(View.VISIBLE);
+        }
+        if (ev != null && fallbackImageView != null && fallbackImageView.getVisibility() != View.VISIBLE) {
+            String url = (!ev.isReviewFallback() && ev.getId() != null && !ev.getId().isEmpty())
+                    ? (ev.hasSnapshot() ? apiClient.getSnapshotUrl(ev.getId())
+                        : ev.getEffectiveThumbnailUrl(apiClient.getThumbnailUrl(ev.getId())))
+                    : ev.getEffectiveThumbnailUrl(null);
+            if (url != null && !url.isEmpty()) {
+                imageLoader.load(url, fallbackImageView);
+                fallbackImageView.setVisibility(View.VISIBLE);
+            }
+        }
+    }
+
+    private void showNoRecordingState(long epochSeconds) {
+        ++streamSessionId;
+        stopAllLiveStreams();
+        stopExoPlayer();
+        stopProgressUpdater();
+        if (videoView != null) {
+            try {
+                videoView.stopPlayback();
+            } catch (Exception ignored) {}
+            videoView.setVisibility(View.GONE);
+        }
+        if (liveImageView != null) {
+            liveImageView.setVisibility(View.GONE);
+        }
+        if (fallbackImageView != null) {
+            fallbackImageView.setVisibility(View.GONE);
+        }
+        if (scrubPreviewView != null) {
+            scrubPreviewView.setVisibility(View.GONE);
+        }
+        if (scrubHudPill != null) {
+            scrubHudPill.setVisibility(View.GONE);
+        }
+        if (progressBar != null) {
+            progressBar.setVisibility(View.GONE);
+        }
+        if (liveBadge != null) {
+            liveBadge.setVisibility(View.GONE);
+        }
+        if (muteBtn != null) {
+            muteBtn.setVisibility(View.GONE);
+        }
+
+        isLiveStreamMode = false;
+        isLivePaused = false;
+        isTimelineMode = true;
+        isHistoryMode = true;
+        isPlaying = false;
+        isNoRecordingError = true;
+        activePreviewFallbackUrl = null;
+        activePreviewEvent = null;
+        timelineStartEpoch = epochSeconds;
+        timelineDurationSeconds = 0L;
+        eventTotalDurationMs = 0;
+
+        if (headerTimeView != null) {
+            headerTimeView.setText(FrigateDateTimeUtils.formatWeekdayDateTime(context, config, epochSeconds * 1000L));
+        }
+        if (timelineRuler != null) {
+            timelineRuler.setCursorEpoch(epochSeconds, false);
+        }
+        syncSelectedDayWithEpoch(epochSeconds);
+        updateObjectBadgesForEpoch(epochSeconds);
+        updatePlayPauseIcon();
+        updateLoopButtonVisibility();
+        updateBboxButtonVisibility();
+        updateSeekBarVisibility();
+        setActiveVideoDimensions(0, 0, 1.0f);
+        updateObjectBoxesOverlayVisibility();
+        updateTransportModeBadge(tr("common_preview_badge"), "#94A3B8", "#161D2B", "#334155");
+        if (errorText != null) {
+            errorText.setText(tr("player_no_recording"));
+            errorText.setVisibility(View.VISIBLE);
+        }
+    }
+
+    private long[] getDayBounds(String dayKey) {
+        if (dayKey == null || "all".equals(dayKey)) return null;
+        try {
+            Date parsed = dayKeyFmt.parse(dayKey);
+            if (parsed == null) return null;
+            Calendar startCal = Calendar.getInstance();
+            startCal.setTime(parsed);
+            startCal.set(Calendar.HOUR_OF_DAY, 0);
+            startCal.set(Calendar.MINUTE, 0);
+            startCal.set(Calendar.SECOND, 0);
+            startCal.set(Calendar.MILLISECOND, 0);
+            long startEpoch = startCal.getTimeInMillis() / 1000L;
+            startCal.add(Calendar.DAY_OF_MONTH, 1);
+            long endEpoch = startCal.getTimeInMillis() / 1000L;
+            return new long[]{startEpoch, endEpoch};
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void syncSelectedDayWithEpoch(long epochSeconds) {
+        if (selectedDayKey != null && !"all".equals(selectedDayKey)) {
+            String cursorDayKey = dayKeyFmt.format(new Date(epochSeconds * 1000L));
+            if (!selectedDayKey.equals(cursorDayKey)) {
+                selectedDayKey = "all";
+            }
+        }
+        updateTimelineDateHeader(epochSeconds);
+    }
+
     private void onRulerScrubStart(long epochSeconds) {
         isRulerScrubbing = true;
+        pendingCalendarJumpBounds = null;
         hideVideoOverlayControls(true);
         updateObjectBoxesOverlayVisibility();
         updateObjectBadgesForEpoch(epochSeconds);
@@ -1861,6 +2312,7 @@ public class FrigatePlayerOverlay {
     }
 
     private void onRulerScrubChanged(long epochSeconds) {
+        syncSelectedDayWithEpoch(epochSeconds);
         updateObjectBadgesForEpoch(epochSeconds);
         updateScrubHud(epochSeconds);
         timelineController.requestScrubSnapshot(epochSeconds);
@@ -1871,12 +2323,18 @@ public class FrigatePlayerOverlay {
         if (scrubHudPill != null) {
             scrubHudPill.setVisibility(View.GONE);
         }
+        syncSelectedDayWithEpoch(epochSeconds);
         long now = System.currentTimeMillis() / 1000L;
         if (now - epochSeconds <= 4L) {
             startLiveStream();
             return;
         }
         long windowSeconds = Math.max(30L, Math.min(1800L, now - epochSeconds));
+        if (timelineController.isRangeLoaded(epochSeconds, epochSeconds + windowSeconds)
+                && timelineController.findFirstRecordingEpochInRange(epochSeconds, epochSeconds + windowSeconds) < 0L) {
+            showEventPreviewOrNoRecording(epochSeconds);
+            return;
+        }
         switchToRecordedMode(epochSeconds, windowSeconds);
     }
 
@@ -1921,6 +2379,9 @@ public class FrigatePlayerOverlay {
         isLivePaused = false;
         isTimelineMode = false;
         isHistoryMode = false;
+        isNoRecordingError = false;
+        activePreviewFallbackUrl = null;
+        activePreviewEvent = null;
         isPlaying = true;
 
         stopExoPlayer();
@@ -1968,7 +2429,11 @@ public class FrigatePlayerOverlay {
             timeDurationText.setText(tr("common_live"));
         }
         if (timelineRuler != null) {
-            timelineRuler.setCursorEpoch(System.currentTimeMillis() / 1000L, true);
+            long liveNow = System.currentTimeMillis() / 1000L;
+            selectedDayKey = "all";
+            pendingCalendarJumpBounds = null;
+            timelineRuler.setCursorEpoch(liveNow, true);
+            updateTimelineDateHeader(liveNow);
         }
         timelineController.resetLiveTailTimer();
         startProgressUpdater();
@@ -2048,6 +2513,9 @@ public class FrigatePlayerOverlay {
         isLivePaused = false;
         isTimelineMode = true;
         isHistoryMode = true;
+        isNoRecordingError = false;
+        activePreviewFallbackUrl = null;
+        activePreviewEvent = null;
         isExoPlayback = false;
         exoController.resetSoftwareDecoderPreference();
         exoFallbackTriggered = false;
@@ -2092,6 +2560,7 @@ public class FrigatePlayerOverlay {
         if (timelineRuler != null) {
             timelineRuler.setCursorEpoch(startEpoch, false);
         }
+        syncSelectedDayWithEpoch(startEpoch);
 
         loadVideo();
     }
@@ -2350,6 +2819,7 @@ public class FrigatePlayerOverlay {
         hlsCurrentPosMs = 0;
 
         progressBar.setVisibility(View.VISIBLE);
+        isNoRecordingError = false;
         errorText.setVisibility(View.GONE);
         if (fallbackImageView != null) {
             fallbackImageView.setVisibility(View.GONE);
@@ -2605,7 +3075,9 @@ public class FrigatePlayerOverlay {
                         }
                     }
                 } else if (timelineRuler != null && !isLivePaused && !isRulerScrubbing) {
-                    timelineRuler.setCursorEpoch(System.currentTimeMillis() / 1000L, true);
+                    long liveNow = System.currentTimeMillis() / 1000L;
+                    timelineRuler.setCursorEpoch(liveNow, true);
+                    updateTimelineDateHeader(liveNow);
                     timelineController.maybeRefreshLiveTimelineTail();
                 }
                 long delayMs = (!isLiveStreamMode && showObjectBoxes && isPlaying && !isRulerScrubbing) ? 16L : 200L;
@@ -2653,6 +3125,7 @@ public class FrigatePlayerOverlay {
             if (timelineRuler != null) {
                 timelineRuler.setCursorEpoch(wallEpoch, false);
             }
+            syncSelectedDayWithEpoch(wallEpoch);
             updateObjectBadgesForEpoch(wallEpoch);
             if (isTimelineMode && headerTimeView != null) {
                 headerTimeView.setText(FrigateDateTimeUtils.formatWeekdayDateTime(context, config, wallEpoch * 1000L));
@@ -2703,6 +3176,9 @@ public class FrigatePlayerOverlay {
     private void releasePlayerResources() {
         if (isClosed) return;
         isClosed = true;
+        if (calendarModal != null && rootLayout != null) {
+            calendarModal.close(rootLayout);
+        }
         stopLiveObjectPoller();
         stopAllLiveStreams();
         stopExoPlayer();

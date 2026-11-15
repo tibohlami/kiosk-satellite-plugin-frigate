@@ -68,6 +68,16 @@ public class FrigateCalendarModal {
                      long fallbackCursorEpochSeconds,
                      Map<String, Integer> dayCounts,
                      DaySelectionListener listener) {
+        show(rootView, selectedDayKey, fallbackCursorEpochSeconds, dayCounts,
+                tr("browser_calendar_all_days"), listener);
+    }
+
+    public void show(FrameLayout rootView,
+                     String selectedDayKey,
+                     long fallbackCursorEpochSeconds,
+                     Map<String, Integer> dayCounts,
+                     String resetButtonLabel,
+                     DaySelectionListener listener) {
         if (rootView == null) return;
         close(rootView);
 
@@ -302,14 +312,16 @@ public class FrigateCalendarModal {
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         arLp.topMargin = s(18);
 
-        TextView allDaysBtn = buildCalendarActionButton(tr("browser_calendar_all_days"),
-                FrigateTheme.surfaceContainerHigh(theme), FrigateTheme.outlineVariant(theme),
-                FrigateTheme.onSurfaceVariant(theme), false);
-        allDaysBtn.setOnClickListener(v -> {
-            close(rootView);
-            if (listener != null) listener.onDaySelected("all");
-        });
-        actionsRow.addView(allDaysBtn);
+        if (resetButtonLabel != null && !resetButtonLabel.trim().isEmpty()) {
+            TextView allDaysBtn = buildCalendarActionButton(resetButtonLabel,
+                    FrigateTheme.surfaceContainerHigh(theme), FrigateTheme.outlineVariant(theme),
+                    FrigateTheme.onSurfaceVariant(theme), false);
+            allDaysBtn.setOnClickListener(v -> {
+                close(rootView);
+                if (listener != null) listener.onDaySelected("all");
+            });
+            actionsRow.addView(allDaysBtn);
+        }
 
         actionsRow.addView(new View(context), new LinearLayout.LayoutParams(0, s(1), 1.0f));
 
