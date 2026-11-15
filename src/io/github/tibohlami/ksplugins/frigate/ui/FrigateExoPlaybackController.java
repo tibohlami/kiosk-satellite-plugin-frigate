@@ -234,6 +234,7 @@ public class FrigateExoPlaybackController {
         stop();
         listener.onExoPreparingSurface();
         if (exoTextureView != null) {
+            exoTextureView.setAlpha(0f);
             exoTextureView.setVisibility(View.VISIBLE);
             updateTextureSize();
         }
@@ -363,7 +364,16 @@ public class FrigateExoPlaybackController {
             @Override
             public void onRenderedFirstFrame() {
                 if (listener.isClosed() || sessionId != listener.getStreamSessionId() || player != exoPlayer) return;
-                listener.onExoFirstFrameRendered();
+                if (exoTextureView != null) {
+                    exoTextureView.post(() -> {
+                        if (listener.isClosed() || sessionId != listener.getStreamSessionId() || player != exoPlayer) return;
+                        updateTextureSize();
+                        exoTextureView.setAlpha(1f);
+                        listener.onExoFirstFrameRendered();
+                    });
+                } else {
+                    listener.onExoFirstFrameRendered();
+                }
             }
 
             @Override
