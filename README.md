@@ -22,6 +22,7 @@ Native Frigate NVR camera viewer with live streams, events & reviews browser, cl
   - Video overlay controls (`-10s`, Play/Pause, `+10s`), timeline seek bar, audio mute/unmute, loop toggle, and optional stream mode badge.
   - Toggleable interpolated **object bounding boxes** overlay over recorded events and timeline playback.
   - Full-height vertical Frigate-style timeline ruler with motion/activity waveform, pinch/button zoom, and real-time recording snapshot preview while scrubbing.
+- **Digital Zoom & Pan**: Pinch-to-zoom (`1.0x`–`5.0x`), double-tap zoom toggle (`2.5x`), and bounded pan across both live streams and recorded playback, with a one-tap reset pill.
 - **Localization (i18n)**:
   - Follows the tablet's default language and 12h/24h date/time format automatically.
   - Built-in **English** and **French** translations, with an optional manual language override in plugin settings.

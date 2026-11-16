@@ -60,6 +60,7 @@ public class FrigatePlayerOverlay {
     private final Runnable onClose;
 
     private FrameLayout videoContainerRef;
+    private FrigateVideoZoomController videoZoomController;
     private View liveHighlightView;
     private LinearLayout liveOverlayBadgeRow;
     private TextView timelineDateBtn;
@@ -1114,35 +1115,36 @@ public class FrigatePlayerOverlay {
     @SuppressLint("SetJavaScriptEnabled")
     private View buildVideoFrame() {
         FrameLayout videoContainer = new FrameLayout(context) {
-            private float touchDownX;
-            private float touchDownY;
+            private boolean touchOwnedByHud = false;
 
             @Override
             public boolean dispatchTouchEvent(MotionEvent ev) {
                 int action = ev.getActionMasked();
                 if (action == MotionEvent.ACTION_DOWN) {
-                    touchDownX = ev.getX();
-                    touchDownY = ev.getY();
                     if (isVideoOverlayControlsVisible()) {
                         scheduleOverlayAutoHide();
                     }
-                } else if (action == MotionEvent.ACTION_UP) {
-                    float dx = Math.abs(ev.getX() - touchDownX);
-                    float dy = Math.abs(ev.getY() - touchDownY);
-                    if (dx < s(12) && dy < s(12)) {
-                        boolean tappedOverlayBtn = isVideoOverlayControlsVisible()
-                                && isPointInsideView(videoOverlayControls, ev.getX(), ev.getY());
-                        boolean tappedError = errorText != null
-                                && errorText.getVisibility() == View.VISIBLE
-                                && isPointInsideView(errorText, ev.getX(), ev.getY());
-                        if (!tappedOverlayBtn && !tappedError && (errorText == null || errorText.getVisibility() != View.VISIBLE)) {
-                            if (isVideoOverlayControlsVisible()) {
-                                hideVideoOverlayControls(true);
-                            } else {
-                                showVideoOverlayControls(true);
-                            }
-                        }
+                    boolean tappedOverlayBtn = isVideoOverlayControlsVisible()
+                            && isPointInsideView(videoOverlayControls, ev.getX(), ev.getY());
+                    boolean tappedError = errorText != null
+                            && errorText.getVisibility() == View.VISIBLE
+                            && isPointInsideView(errorText, ev.getX(), ev.getY());
+                    boolean tappedZoomReset = videoZoomController != null
+                            && videoZoomController.getZoomResetPill().getVisibility() == View.VISIBLE
+                            && isPointInsideView(videoZoomController.getZoomResetPill(), ev.getX(), ev.getY());
+                    touchOwnedByHud = tappedOverlayBtn || tappedError || tappedZoomReset;
+                }
+
+                if (touchOwnedByHud) {
+                    boolean handled = super.dispatchTouchEvent(ev);
+                    if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                        touchOwnedByHud = false;
                     }
+                    return handled;
+                }
+
+                if (videoZoomController != null) {
+                    return videoZoomController.onTouchEvent(ev);
                 }
                 return super.dispatchTouchEvent(ev);
             }
@@ -1152,12 +1154,37 @@ public class FrigatePlayerOverlay {
         updateVideoContainerTheme();
         videoContainer.setClipToOutline(true);
 
+        FrameLayout zoomViewport = new FrameLayout(context);
+        videoContainer.addView(zoomViewport, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+
+        this.videoZoomController = new FrigateVideoZoomController(
+                context, theme, config, zoomViewport,
+                new FrigateVideoZoomController.Listener() {
+                    @Override
+                    public void onSingleTapVideo() {
+                        if (isVideoOverlayControlsVisible()) {
+                            hideVideoOverlayControls(true);
+                        } else {
+                            showVideoOverlayControls(true);
+                        }
+                    }
+
+                    @Override
+                    public boolean isErrorVisible() {
+                        return errorText != null && errorText.getVisibility() == View.VISIBLE;
+                    }
+                });
+
         // 0. Native Media3 ExoPlayer TextureView (primary hardware HLS VOD playback)
-        videoContainer.addView(exoController.createTextureView());
+        zoomViewport.addView(exoController.createTextureView());
         videoContainer.addOnLayoutChangeListener((v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
             if ((right - left) != (oldRight - oldLeft) || (bottom - top) != (oldBottom - oldTop)) {
                 exoController.updateTextureSize();
                 updateObjectBoxesBounds();
+                if (videoZoomController != null) {
+                    videoZoomController.onViewportSizeChanged();
+                }
             }
         });
 
@@ -1168,24 +1195,24 @@ public class FrigatePlayerOverlay {
         vvLp.gravity = Gravity.CENTER;
         videoView.setLayoutParams(vvLp);
         videoView.setVisibility(View.GONE);
-        videoContainer.addView(videoView);
+        zoomViewport.addView(videoView);
 
         // 2. HTML5 MSE WebSocket WebView (for live HD video + audio via Frigate go2rtc)
-        videoContainer.addView(webStreamController.createWebView(context), new FrameLayout.LayoutParams(
+        zoomViewport.addView(webStreamController.createWebView(context), new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
         // 3. Real-time MJPEG Live Stream ImageView (fallback if go2rtc MSE is unavailable)
         liveImageView = new ImageView(context);
         liveImageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
         liveImageView.setVisibility(View.GONE);
-        videoContainer.addView(liveImageView, new FrameLayout.LayoutParams(
+        zoomViewport.addView(liveImageView, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
         // 4. Fallback snapshot image view (displayed if video playback is unsupported or failed)
         fallbackImageView = new ImageView(context);
         fallbackImageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
         fallbackImageView.setVisibility(View.GONE);
-        videoContainer.addView(fallbackImageView, new FrameLayout.LayoutParams(
+        zoomViewport.addView(fallbackImageView, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
         // 4b. Real-time low-res snapshot & preview MP4 surfaces displayed while scrubbing vertical timeline
@@ -1193,12 +1220,12 @@ public class FrigatePlayerOverlay {
         scrubPreviewView.setScaleType(ImageView.ScaleType.FIT_CENTER);
         scrubPreviewView.setBackgroundColor(Color.TRANSPARENT);
         scrubPreviewView.setVisibility(View.GONE);
-        videoContainer.addView(scrubPreviewView, new FrameLayout.LayoutParams(
+        zoomViewport.addView(scrubPreviewView, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
         scrubPreviewTextureView = new TextureView(context);
         scrubPreviewTextureView.setVisibility(View.GONE);
-        videoContainer.addView(scrubPreviewTextureView, new FrameLayout.LayoutParams(
+        zoomViewport.addView(scrubPreviewTextureView, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT, Gravity.CENTER));
         scrubPreviewPlayerController = new FrigateScrubPreviewPlayerController(
                 context, host, config, apiClient, scrubPreviewTextureView,
@@ -1223,8 +1250,16 @@ public class FrigatePlayerOverlay {
         objectBoxesOverlay.setConfig(config);
         objectBoxesOverlay.setUiScale(config != null ? config.getUiScale() : 1.0f);
         objectBoxesOverlay.setVisibility((!isLiveStreamMode && showObjectBoxes) ? View.VISIBLE : View.GONE);
-        videoContainer.addView(objectBoxesOverlay, new FrameLayout.LayoutParams(
+        zoomViewport.addView(objectBoxesOverlay, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+
+        // 4c-ter. Zoom factor & one-tap reset pill (top-right, visible only when zoomed in)
+        FrameLayout.LayoutParams zoomResetLp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
+        zoomResetLp.gravity = Gravity.TOP | Gravity.RIGHT;
+        int zoomResetMargin = s(12);
+        zoomResetLp.setMargins(0, zoomResetMargin, zoomResetMargin, 0);
+        videoContainer.addView(videoZoomController.getZoomResetPill(), zoomResetLp);
 
         // 4c-bis. Live camera activity border highlight + overlay object pills (matching home screen)
         liveHighlightView = new View(context);
@@ -3245,6 +3280,9 @@ public class FrigatePlayerOverlay {
         timelineController.destroy();
         if (scrubPreviewPlayerController != null) {
             scrubPreviewPlayerController.release();
+        }
+        if (videoZoomController != null) {
+            videoZoomController.destroy();
         }
         if (videoView != null) {
             try {
