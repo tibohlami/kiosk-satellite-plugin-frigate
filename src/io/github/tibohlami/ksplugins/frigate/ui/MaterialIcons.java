@@ -67,6 +67,11 @@ public final class MaterialIcons {
     public static final String ZOOM_IN = "mdi:magnify-plus-outline";
     public static final String ZOOM_OUT = "mdi:magnify-minus-outline";
     public static final String BOUNDING_BOX = "mdi:vector-square";
+    public static final String PTZ = "mdi:crosshairs-gps";
+    public static final String ARROW_UP = "mdi:chevron-up";
+    public static final String ARROW_DOWN = "mdi:chevron-down";
+    public static final String ARROW_LEFT = "mdi:chevron-left";
+    public static final String ARROW_RIGHT = "mdi:chevron-right";
 
     private static final Map<String, String> SVG_PATHS = new HashMap<>();
     private static final Map<String, Path> PARSED_PATHS = new HashMap<>();
@@ -112,6 +117,11 @@ public final class MaterialIcons {
                 "M18 4 C16.29 4 15.25 4.33 14.65 4.61 C13.88 4.23 13 4 12 4 C11 4 10.12 4.23 9.35 4.61 C8.75 4.33 7.71 4 6 4 C3 4 1 12 1 14 C1 14.83 2.32 15.59 4.14 15.9 C4.78 18.14 7.8 19.85 11.5 20 V15.72 C10.91 15.35 10 14.68 10 14 C10 13 12 13 12 13 C12 13 14 13 14 14 C14 14.68 13.09 15.35 12.5 15.72 V20 C16.2 19.85 19.22 18.14 19.86 15.9 C21.68 15.59 23 14.83 23 14 C23 12 21 4 18 4 M4.15 13.87 C3.65 13.75 3.26 13.61 3 13.5 C3.25 10.73 5.2 6.4 6.05 6 C6.59 6 7 6.06 7.37 6.11 C5.27 8.42 4.44 12.04 4.15 13.87 M9 12 C8.45 12 8 11.55 8 11 C8 10.46 8.45 10 9 10 C9.55 10 10 10.45 10 11 C10 11.56 9.55 12 9 12 M15 12 C14.45 12 14 11.55 14 11 C14 10.46 14.45 10 15 10 C15.55 10 16 10.45 16 11 C16 11.56 15.55 12 15 12 M19.85 13.87 C19.56 12.04 18.73 8.42 16.63 6.11 C17 6.06 17.41 6 17.95 6 C18.8 6.4 20.75 10.73 21 13.5 C20.75 13.61 20.36 13.75 19.85 13.87 Z");
         SVG_PATHS.put(BIRD,
                 "M23 11.5L19.95 10.37C19.69 9.22 19.04 8.56 19.04 8.56C17.4 6.92 14.75 6.92 13.11 8.56L11.63 10.04L5 3C4 7 5 11 7.45 14.22L2 19.5C2 19.5 10.89 21.5 16.07 17.45C18.83 15.29 19.45 14.03 19.84 12.7L23 11.5M17.71 11.72C17.32 12.11 16.68 12.11 16.29 11.72C15.9 11.33 15.9 10.7 16.29 10.31C16.68 9.92 17.32 9.92 17.71 10.31C18.1 10.7 18.1 11.33 17.71 11.72Z");
+        SVG_PATHS.put(PTZ, "M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3A8.994 8.994 0 0 0 13 3.06V1h-2v2.06A8.994 8.994 0 0 0 3.06 11H1v2h2.06A8.994 8.994 0 0 0 11 20.94V23h2v-2.06A8.994 8.994 0 0 0 20.94 13H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z");
+        SVG_PATHS.put(ARROW_UP, "M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z");
+        SVG_PATHS.put(ARROW_DOWN, "M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z");
+        SVG_PATHS.put(ARROW_LEFT, "M15.41 16.59L10.83 12l4.58-4.59L14 6l-6 6 6 6z");
+        SVG_PATHS.put(ARROW_RIGHT, "M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6z");
         SVG_PATHS.put(MOTORCYCLE,
                 "M17.42 10 L13.41 6 H9 V8 H12.59 L14.59 10 H6.5 C4 10 2 12 2 14.5 C2 17 4 19 6.5 19 C8.72 19 10.56 17.38 10.92 15.27 L13.04 14 C13 14.17 13 14.33 13 14.5 C13 17 15 19 17.5 19 C20 19 22 17 22 14.5 C22 12 20 10 17.5 10 M8.84 15.26 C8.5 16.27 7.58 17 6.47 17 C5.09 17 3.97 15.88 3.97 14.5 C3.97 13.12 5.09 12 6.47 12 C7.59 12 8.5 12.74 8.84 13.75 H6 V15.25 L8.84 15.26 M17.47 17 C16.09 17 14.97 15.88 14.97 14.5 C14.97 13.12 16.09 12 17.47 12 C18.85 12 19.97 13.12 19.97 14.5 C19.97 15.88 18.85 17 17.47 17 Z");
         SVG_PATHS.put(BUS,

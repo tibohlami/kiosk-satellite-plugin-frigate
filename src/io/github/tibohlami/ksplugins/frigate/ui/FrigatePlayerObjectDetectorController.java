@@ -280,6 +280,14 @@ public class FrigatePlayerObjectDetectorController {
         }
     }
 
+    public boolean sendPtzCommand(String camera, String command) {
+        if (liveWsClient == null || camera == null || camera.trim().isEmpty()
+                || command == null || command.trim().isEmpty()) {
+            return false;
+        }
+        return liveWsClient.sendTopicPayload(camera.trim() + "/ptz", command.trim());
+    }
+
     private void handleWsEvent(String type, JSONObject obj) {
         if (obj == null) return;
         String cam = bridge.getCurrentCamera();

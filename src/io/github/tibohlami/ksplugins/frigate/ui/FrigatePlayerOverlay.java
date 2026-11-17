@@ -25,6 +25,7 @@ import io.github.tibohlami.ksplugins.frigate.api.FrigateApiClient;
 import io.github.tibohlami.ksplugins.frigate.config.FrigateConfig;
 import io.github.tibohlami.ksplugins.frigate.model.FrigateEvent;
 import io.github.tibohlami.ksplugins.frigate.model.PreviewSegment;
+import io.github.tibohlami.ksplugins.frigate.model.PtzInfo;
 import io.github.tibohlami.ksplugins.frigate.model.RecordingSegment;
 import io.github.tibohlami.ksplugins.frigate.model.ReviewSegment;
 import io.github.tibohlami.ksplugins.frigate.model.TimelineBoxEntry;
@@ -61,6 +62,9 @@ public class FrigatePlayerOverlay {
 
     private FrameLayout videoContainerRef;
     private FrigateVideoZoomController videoZoomController;
+    private FrigatePtzOverlayController ptzOverlayController;
+    private PtzInfo ptzInfo = PtzInfo.UNSUPPORTED;
+    private TextView ptzBtn;
     private View liveHighlightView;
     private LinearLayout liveOverlayBadgeRow;
     private TextView timelineDateBtn;
@@ -909,6 +913,10 @@ public class FrigatePlayerOverlay {
         updateMuteButtonStyle();
         updateLoopButtonStyle();
         updateBboxButtonStyle();
+        updatePtzButtonStyle();
+        if (ptzOverlayController != null) {
+            ptzOverlayController.onThemeChanged(theme);
+        }
         if (lastTransportLabel != null) {
             updateTransportModeBadge(lastTransportLabel, lastTransportTextHex, lastTransportBgHex, lastTransportStrokeHex);
         }
@@ -1080,6 +1088,25 @@ public class FrigatePlayerOverlay {
         bbLp.rightMargin = s(8);
         header.addView(bboxBtn, bbLp);
 
+        // PTZ Controls Toggle Button (shown in Live mode when camera supports ONVIF PTZ)
+        ptzBtn = new TextView(context);
+        ptzBtn.setText("PTZ");
+        ptzBtn.setGravity(Gravity.CENTER);
+        updatePtzButtonStyle();
+        ptzBtn.setPadding(s(14), s(8), s(14), s(8));
+        ptzBtn.setTextSize(sp(13));
+        ptzBtn.setVisibility(View.GONE);
+        ptzBtn.setOnClickListener(v -> {
+            if (ptzOverlayController != null) {
+                ptzOverlayController.toggle();
+            }
+        });
+        LinearLayout.LayoutParams ptzLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        ptzLp.rightMargin = s(8);
+        header.addView(ptzBtn, ptzLp);
+        fetchCameraPtzInfo();
+
         // Close Button with Material Close icon
         playerCloseBtn = new TextView(context);
         playerCloseBtn.setText(tr("common_close"));
@@ -1132,7 +1159,10 @@ public class FrigatePlayerOverlay {
                     boolean tappedZoomReset = videoZoomController != null
                             && videoZoomController.getZoomResetPill().getVisibility() == View.VISIBLE
                             && isPointInsideView(videoZoomController.getZoomResetPill(), ev.getX(), ev.getY());
-                    touchOwnedByHud = tappedOverlayBtn || tappedError || tappedZoomReset;
+                    boolean tappedPtzPanel = ptzOverlayController != null
+                            && ptzOverlayController.getPanelView().getVisibility() == View.VISIBLE
+                            && isPointInsideView(ptzOverlayController.getPanelView(), ev.getX(), ev.getY());
+                    touchOwnedByHud = tappedOverlayBtn || tappedError || tappedZoomReset || tappedPtzPanel;
                 }
 
                 if (touchOwnedByHud) {
@@ -1260,6 +1290,29 @@ public class FrigatePlayerOverlay {
         int zoomResetMargin = s(12);
         zoomResetLp.setMargins(0, zoomResetMargin, zoomResetMargin, 0);
         videoContainer.addView(videoZoomController.getZoomResetPill(), zoomResetLp);
+
+        // 4c-quater. Floating ONVIF PTZ control panel (center-right, toggled by header PTZ button)
+        this.ptzOverlayController = new FrigatePtzOverlayController(
+                context, theme, config,
+                new FrigatePtzOverlayController.Listener() {
+                    @Override
+                    public void onPtzCommand(String command) {
+                        objectDetectorController.sendPtzCommand(currentCamera, command);
+                    }
+
+                    @Override
+                    public void onPtzVisibilityChanged(boolean visible) {
+                        updatePtzButtonStyle();
+                    }
+                });
+        if (ptzInfo != null && ptzInfo.isSupported()) {
+            ptzOverlayController.setPtzInfo(ptzInfo);
+        }
+        FrameLayout.LayoutParams ptzPanelLp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
+        ptzPanelLp.gravity = Gravity.CENTER_VERTICAL | Gravity.RIGHT;
+        ptzPanelLp.rightMargin = s(16);
+        videoContainer.addView(ptzOverlayController.getPanelView(), ptzPanelLp);
 
         // 4c-bis. Live camera activity border highlight + overlay object pills (matching home screen)
         liveHighlightView = new View(context);
@@ -1822,6 +1875,42 @@ public class FrigatePlayerOverlay {
     private void updateBboxButtonVisibility() {
         if (bboxBtn != null) {
             bboxBtn.setVisibility(isLiveStreamMode ? View.GONE : View.VISIBLE);
+        }
+        updatePtzButtonVisibility();
+    }
+
+    private void fetchCameraPtzInfo() {
+        if (apiClient == null || currentCamera == null || currentCamera.trim().isEmpty()) return;
+        apiClient.fetchPtzInfo(currentCamera, new FrigateApiClient.Callback<PtzInfo>() {
+            @Override
+            public void onSuccess(PtzInfo result) {
+                progressHandler.post(() -> {
+                    if (isClosed) return;
+                    ptzInfo = result != null ? result : PtzInfo.UNSUPPORTED;
+                    if (ptzOverlayController != null) {
+                        ptzOverlayController.setPtzInfo(ptzInfo);
+                    }
+                    updatePtzButtonVisibility();
+                });
+            }
+
+            @Override
+            public void onError(Exception error) {}
+        });
+    }
+
+    private void updatePtzButtonStyle() {
+        boolean active = ptzOverlayController != null && ptzOverlayController.isVisible();
+        applyTogglePillStyle(ptzBtn, active, MaterialIcons.PTZ);
+    }
+
+    private void updatePtzButtonVisibility() {
+        boolean show = isLiveStreamMode && ptzInfo != null && ptzInfo.isSupported();
+        if (ptzBtn != null) {
+            ptzBtn.setVisibility(show ? View.VISIBLE : View.GONE);
+        }
+        if (!show && ptzOverlayController != null && ptzOverlayController.isVisible()) {
+            ptzOverlayController.hide(false);
         }
     }
 
@@ -3283,6 +3372,9 @@ public class FrigatePlayerOverlay {
         }
         if (videoZoomController != null) {
             videoZoomController.destroy();
+        }
+        if (ptzOverlayController != null) {
+            ptzOverlayController.destroy();
         }
         if (videoView != null) {
             try {

@@ -17,6 +17,8 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import me.jxl.kiosk.plugins.PluginHost;
 import org.json.JSONObject;
 
@@ -50,7 +52,13 @@ public final class FrigateEventsWsClient implements Closeable {
     private volatile boolean closed = false;
     private volatile boolean connected = false;
     private volatile Socket activeSocket;
+    private volatile OutputStream activeOutputStream;
     private final Object writeLock = new Object();
+    private final ExecutorService sendExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "FrigateEventsWs-Send");
+        t.setDaemon(true);
+        return t;
+    });
     private Thread workerThread;
 
     public FrigateEventsWsClient(FrigateConfig config, PluginHost host, Listener listener) {
@@ -74,10 +82,32 @@ public final class FrigateEventsWsClient implements Closeable {
     public void close() {
         closed = true;
         connected = false;
+        activeOutputStream = null;
         mainHandler.removeCallbacksAndMessages(null);
+        sendExecutor.shutdownNow();
         closeActiveSocket();
         if (workerThread != null) {
             workerThread.interrupt();
+        }
+    }
+
+    public boolean sendTopicPayload(String topic, String payload) {
+        if (closed || !connected || topic == null || topic.isEmpty()) return false;
+        final OutputStream out = activeOutputStream;
+        if (out == null) return false;
+        try {
+            JSONObject msg = new JSONObject();
+            msg.put("topic", topic);
+            msg.put("payload", payload != null ? payload : "");
+            final byte[] bytes = msg.toString().getBytes(StandardCharsets.UTF_8);
+            sendExecutor.execute(() -> {
+                if (!closed && connected && activeOutputStream == out) {
+                    sendFrame(out, 0x1, bytes);
+                }
+            });
+            return true;
+        } catch (Throwable ignored) {
+            return false;
         }
     }
 
@@ -148,6 +178,7 @@ public final class FrigateEventsWsClient implements Closeable {
 
         InputStream in = new BufferedInputStream(socket.getInputStream(), 16384);
         OutputStream out = socket.getOutputStream();
+        activeOutputStream = out;
 
         byte[] keyBytes = new byte[16];
         random.nextBytes(keyBytes);
@@ -322,13 +353,30 @@ public final class FrigateEventsWsClient implements Closeable {
     }
 
     private boolean sendControlFrame(OutputStream out, int opcode, byte[] payload) {
+        int len = Math.min(payload != null ? payload.length : 0, 125);
+        byte[] capped = payload;
+        if (payload != null && payload.length > 125) {
+            capped = new byte[125];
+            System.arraycopy(payload, 0, capped, 0, 125);
+        }
+        return sendFrame(out, opcode, capped);
+    }
+
+    private boolean sendFrame(OutputStream out, int opcode, byte[] payload) {
         synchronized (writeLock) {
             try {
-                int len = Math.min(payload != null ? payload.length : 0, 125);
+                int len = payload != null ? payload.length : 0;
+                if (len > 65535) return false;
                 byte[] mask = new byte[4];
                 random.nextBytes(mask);
                 out.write(0x80 | (opcode & 0x0F));
-                out.write(0x80 | len);
+                if (len <= 125) {
+                    out.write(0x80 | len);
+                } else {
+                    out.write(0x80 | 126);
+                    out.write((len >> 8) & 0xFF);
+                    out.write(len & 0xFF);
+                }
                 out.write(mask);
                 for (int i = 0; i < len; i++) {
                     out.write(payload[i] ^ mask[i & 3]);

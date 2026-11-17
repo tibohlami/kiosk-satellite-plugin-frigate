@@ -13,6 +13,7 @@ Native Frigate NVR camera viewer with live streams, events & reviews browser, cl
   - Camera grid with live snapshots and one-tap live player launch.
   - Real-time live video/audio playback.
   - Live detected object pills refreshed in real time in the player header.
+  - **ONVIF PTZ Controls**: Floating D-pad, zoom buttons, and preset pills in the live player for PTZ-capable cameras.
 - **Events & Reviews Browser**:
   - Browse recent Frigate detections, alerts, and review segments merged chronologically.
   - Filter by **type**, **camera**, **tracked object labels**, and **date**.
