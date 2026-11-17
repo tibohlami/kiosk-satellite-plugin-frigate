@@ -7,6 +7,7 @@ import io.github.tibohlami.ksplugins.frigate.model.DaySummary;
 import io.github.tibohlami.ksplugins.frigate.model.FrigateCamera;
 import io.github.tibohlami.ksplugins.frigate.model.FrigateEvent;
 import io.github.tibohlami.ksplugins.frigate.model.PreviewSegment;
+import io.github.tibohlami.ksplugins.frigate.model.PtzInfo;
 import io.github.tibohlami.ksplugins.frigate.model.RecordingSegment;
 import io.github.tibohlami.ksplugins.frigate.model.ReviewSegment;
 import io.github.tibohlami.ksplugins.frigate.model.TimelineBoxEntry;
@@ -153,6 +154,25 @@ public class FrigateApiClient {
                 } catch (Throwable e) {
                     if (!isShutdown) {
                         callback.onError(e instanceof Exception ? (Exception) e : new Exception(e));
+                    }
+                }
+            });
+        } catch (RejectedExecutionException ignored) {}
+    }
+
+    public void fetchPtzInfo(String camera, Callback<PtzInfo> callback) {
+        if (isShutdown || executor.isShutdown() || camera == null || camera.trim().isEmpty()) return;
+        try {
+            executor.execute(() -> {
+                if (isShutdown) return;
+                try {
+                    String url = config.getFrigateUrl() + "/api/" + encodePath(camera.trim()) + "/ptz/info";
+                    String response = executeGet(url);
+                    if (isShutdown) return;
+                    callback.onSuccess(PtzInfo.fromJson(response));
+                } catch (Throwable e) {
+                    if (!isShutdown) {
+                        callback.onSuccess(PtzInfo.UNSUPPORTED);
                     }
                 }
             });
