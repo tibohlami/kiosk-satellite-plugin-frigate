@@ -17,6 +17,7 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import me.jxl.kiosk.plugins.PluginHost;
@@ -34,6 +35,7 @@ public final class FrigateEventsWsClient implements Closeable {
         void onWsDisconnected();
         void onFrigateEventMessage(String type, JSONObject afterObj, JSONObject beforeObj);
         void onFrigateReviewMessage(String type, JSONObject afterObj, JSONObject beforeObj);
+        default void onFrigateMotionMessage(String camera, boolean active) {}
     }
 
     private static final int CONNECT_TIMEOUT_MS = 10_000;
@@ -43,9 +45,55 @@ public final class FrigateEventsWsClient implements Closeable {
     private static final long INITIAL_RETRY_MS = 2_000L;
     private static final long MAX_RETRY_MS = 15_000L;
 
+    private static final Object SHARED_LOCK = new Object();
+    private static FrigateEventsWsClient sharedInstance;
+
+    public static FrigateEventsWsClient acquireShared(FrigateConfig config, PluginHost host, Listener listener) {
+        if (listener == null) return null;
+        synchronized (SHARED_LOCK) {
+            if (sharedInstance == null || sharedInstance.closed) {
+                sharedInstance = new FrigateEventsWsClient(config, host, null);
+                sharedInstance.addListener(listener);
+                sharedInstance.start();
+            } else {
+                sharedInstance.addListener(listener);
+                final FrigateEventsWsClient instance = sharedInstance;
+                if (instance.isConnected()) {
+                    instance.mainHandler.post(() -> {
+                        if (!instance.closed && instance.listeners.contains(listener)) {
+                            listener.onWsConnected();
+                        }
+                    });
+                }
+            }
+            return sharedInstance;
+        }
+    }
+
+    public static void releaseShared(Listener listener) {
+        if (listener == null) return;
+        synchronized (SHARED_LOCK) {
+            if (sharedInstance == null) return;
+            sharedInstance.removeListener(listener);
+            if (sharedInstance.listeners.isEmpty()) {
+                sharedInstance.close();
+                sharedInstance = null;
+            }
+        }
+    }
+
+    public static void shutdownShared() {
+        synchronized (SHARED_LOCK) {
+            if (sharedInstance != null) {
+                sharedInstance.close();
+                sharedInstance = null;
+            }
+        }
+    }
+
     private final FrigateConfig config;
     private final PluginHost host;
-    private final Listener listener;
+    private final CopyOnWriteArraySet<Listener> listeners = new CopyOnWriteArraySet<>();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final SecureRandom random = new SecureRandom();
 
@@ -64,7 +112,21 @@ public final class FrigateEventsWsClient implements Closeable {
     public FrigateEventsWsClient(FrigateConfig config, PluginHost host, Listener listener) {
         this.config = config;
         this.host = host;
-        this.listener = listener;
+        if (listener != null) {
+            this.listeners.add(listener);
+        }
+    }
+
+    public void addListener(Listener listener) {
+        if (listener != null && !closed) {
+            this.listeners.add(listener);
+        }
+    }
+
+    public void removeListener(Listener listener) {
+        if (listener != null) {
+            this.listeners.remove(listener);
+        }
     }
 
     public boolean isConnected() {
@@ -83,6 +145,7 @@ public final class FrigateEventsWsClient implements Closeable {
         closed = true;
         connected = false;
         activeOutputStream = null;
+        listeners.clear();
         mainHandler.removeCallbacksAndMessages(null);
         sendExecutor.shutdownNow();
         closeActiveSocket();
@@ -137,7 +200,9 @@ public final class FrigateEventsWsClient implements Closeable {
                 if (connected || wasConnected) {
                     connected = false;
                     mainHandler.post(() -> {
-                        if (!closed && listener != null) listener.onWsDisconnected();
+                        if (!closed) {
+                            for (Listener l : listeners) l.onWsDisconnected();
+                        }
                     });
                 }
                 closeActiveSocket();
@@ -211,7 +276,9 @@ public final class FrigateEventsWsClient implements Closeable {
         connected = true;
         logDebug("Frigate: /ws connected (" + wsPath + ")");
         mainHandler.post(() -> {
-            if (!closed && listener != null) listener.onWsConnected();
+            if (!closed) {
+                for (Listener l : listeners) l.onWsConnected();
+            }
         });
 
         Thread pingThread = new Thread(() -> {
@@ -325,10 +392,23 @@ public final class FrigateEventsWsClient implements Closeable {
     }
 
     private void handleTextMessage(String text) {
-        if (closed || listener == null || text == null || text.isEmpty()) return;
+        if (closed || listeners.isEmpty() || text == null || text.isEmpty()) return;
         try {
             JSONObject root = new JSONObject(text);
             String topic = root.optString("topic", "");
+            if (topic.endsWith("/motion")) {
+                final String cam = topic.substring(0, topic.length() - "/motion".length());
+                final String raw = root.optString("payload", "");
+                final boolean active = "ON".equalsIgnoreCase(raw.trim()) || "true".equalsIgnoreCase(raw.trim());
+                if (!cam.isEmpty()) {
+                    mainHandler.post(() -> {
+                        if (!closed) {
+                            for (Listener l : listeners) l.onFrigateMotionMessage(cam, active);
+                        }
+                    });
+                }
+                return;
+            }
             if (!"events".equals(topic) && !"reviews".equals(topic)) return;
 
             JSONObject payload = root.optJSONObject("payload");
@@ -342,11 +422,11 @@ public final class FrigateEventsWsClient implements Closeable {
             final JSONObject beforeObj = payload.optJSONObject("before");
 
             mainHandler.post(() -> {
-                if (closed || listener == null) return;
+                if (closed) return;
                 if ("events".equals(topic)) {
-                    listener.onFrigateEventMessage(type, afterObj, beforeObj);
+                    for (Listener l : listeners) l.onFrigateEventMessage(type, afterObj, beforeObj);
                 } else if ("reviews".equals(topic)) {
-                    listener.onFrigateReviewMessage(type, afterObj, beforeObj);
+                    for (Listener l : listeners) l.onFrigateReviewMessage(type, afterObj, beforeObj);
                 }
             });
         } catch (Throwable ignored) {}
