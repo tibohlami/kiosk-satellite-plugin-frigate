@@ -78,6 +78,7 @@ public class FrigatePlayerObjectDetectorController {
     private boolean liveObjectPollerRunning = false;
     private volatile boolean liveObjectPollInFlight = false;
     private FrigateEventsWsClient liveWsClient;
+    private FrigateEventsWsClient.Listener liveWsListener;
     private final Map<String, ActiveLiveDetection> liveDetectionsById = new LinkedHashMap<>();
     private final Map<String, String> activeReviewSeverityById = new LinkedHashMap<>();
     private final Map<String, String> eventSeverityFromReview = new LinkedHashMap<String, String>(64, 0.75f, true) {
@@ -242,7 +243,7 @@ public class FrigatePlayerObjectDetectorController {
 
     private void startLiveWsClient() {
         stopLiveWsClient();
-        liveWsClient = new FrigateEventsWsClient(config, host, new FrigateEventsWsClient.Listener() {
+        liveWsListener = new FrigateEventsWsClient.Listener() {
             @Override
             public void onWsConnected() {
                 if (!liveObjectPollerRunning || bridge.isClosed() || !bridge.isLiveStreamMode()) return;
@@ -267,17 +268,16 @@ public class FrigatePlayerObjectDetectorController {
                 if (!liveObjectPollerRunning || bridge.isClosed() || !bridge.isLiveStreamMode()) return;
                 handleWsReview(type, afterObj != null ? afterObj : beforeObj);
             }
-        });
-        liveWsClient.start();
+        };
+        liveWsClient = FrigateEventsWsClient.acquireShared(config, host, liveWsListener);
     }
 
     private void stopLiveWsClient() {
-        if (liveWsClient != null) {
-            try {
-                liveWsClient.close();
-            } catch (Throwable ignored) {}
-            liveWsClient = null;
+        if (liveWsListener != null) {
+            FrigateEventsWsClient.releaseShared(liveWsListener);
+            liveWsListener = null;
         }
+        liveWsClient = null;
     }
 
     public boolean sendPtzCommand(String camera, String command) {

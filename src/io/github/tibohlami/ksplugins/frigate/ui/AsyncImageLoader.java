@@ -76,13 +76,17 @@ public class AsyncImageLoader {
     }
 
     public void load(String urlString, ImageView imageView) {
-        boolean bypassCache = urlString != null && urlString.contains("/latest.jpg");
+        boolean bypassCache = isLatestSnapshotUrl(urlString);
         loadInternal(urlString, imageView, !bypassCache, 480, 270);
     }
 
     public void load(String urlString, ImageView imageView, int reqWidth, int reqHeight) {
-        boolean bypassCache = urlString != null && urlString.contains("/latest.jpg");
+        boolean bypassCache = isLatestSnapshotUrl(urlString);
         loadInternal(urlString, imageView, !bypassCache, reqWidth, reqHeight);
+    }
+
+    private static boolean isLatestSnapshotUrl(String urlString) {
+        return urlString != null && (urlString.contains("/latest.jpg") || urlString.contains("/latest.webp"));
     }
 
     /**
@@ -249,7 +253,13 @@ public class AsyncImageLoader {
         if (urlString == null || urlString.isEmpty()) return null;
         int qIdx = urlString.indexOf('?');
         String base = (qIdx >= 0) ? urlString.substring(0, qIdx) : urlString;
-        return base.endsWith("/latest.jpg") ? base : null;
+        if (base.endsWith("/latest.jpg")) {
+            return base.substring(0, base.length() - 4);
+        }
+        if (base.endsWith("/latest.webp")) {
+            return base.substring(0, base.length() - 5);
+        }
+        return null;
     }
 
     public void clearCache() {

@@ -218,6 +218,10 @@ public class FrigateApiClient {
         return config.getFrigateUrl() + "/api/" + encodePath(camera) + "/latest.jpg";
     }
 
+    public String getLatestWebpUrl(String camera) {
+        return config.getFrigateUrl() + "/api/" + encodePath(camera) + "/latest.webp";
+    }
+
     public String getLiveMjpegUrl(String camera, int fps, int height) {
         return config.getFrigateUrl() + "/api/" + encodePath(camera) + "?fps=" + fps + "&height=" + height;
     }

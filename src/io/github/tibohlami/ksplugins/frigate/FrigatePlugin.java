@@ -15,6 +15,7 @@ import me.jxl.kiosk.plugins.OverlayFactory;
 import me.jxl.kiosk.plugins.OverlaySpec;
 import me.jxl.kiosk.plugins.PluginHost;
 import io.github.tibohlami.ksplugins.frigate.api.FrigateApiClient;
+import io.github.tibohlami.ksplugins.frigate.api.FrigateEventsWsClient;
 import io.github.tibohlami.ksplugins.frigate.api.FrigateUrlAutoDetector;
 import io.github.tibohlami.ksplugins.frigate.config.FrigateConfig;
 import io.github.tibohlami.ksplugins.frigate.model.ConnectionTestResult;
@@ -579,6 +580,7 @@ public final class FrigatePlugin implements KioskPlugin {
             imageLoader.shutdown();
             imageLoader = null;
         }
+        FrigateEventsWsClient.shutdownShared();
         AsyncImageLoader.clearAllStaticCaches();
         FrigateClipCacheManager.clearAllCachedClips();
         this.host = null;

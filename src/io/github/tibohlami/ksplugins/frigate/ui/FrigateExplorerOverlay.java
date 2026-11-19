@@ -19,15 +19,20 @@ import android.widget.TextView;
 import me.jxl.kiosk.plugins.KsTheme;
 import me.jxl.kiosk.plugins.PluginHost;
 import io.github.tibohlami.ksplugins.frigate.api.FrigateApiClient;
+import io.github.tibohlami.ksplugins.frigate.api.FrigateEventsWsClient;
 import io.github.tibohlami.ksplugins.frigate.api.FrigateHttpHelper;
 import io.github.tibohlami.ksplugins.frigate.config.FrigateConfig;
 import io.github.tibohlami.ksplugins.frigate.model.FrigateCamera;
 import io.github.tibohlami.ksplugins.frigate.model.FrigateEvent;
+import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.Set;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -97,8 +102,21 @@ public class FrigateExplorerOverlay {
     private final List<FrigateCamera> discoveredCameras = new ArrayList<>();
     private final List<FrigateEvent> loadedEvents = new ArrayList<>();
     private final Map<String, ImageView> cameraPreviewMap = new LinkedHashMap<>();
+    private static final long ACTIVE_SNAPSHOT_INTERVAL_MS = 450L;
+    private static final long IDLE_SNAPSHOT_INTERVAL_MS = 3000L;
+    private static final long ADAPTIVE_TICK_MS = 450L;
+    private static final long ONGOING_RECONCILE_WS_MS = 15000L;
+
     private final Map<String, View> cameraHighlightMap = new HashMap<>();
     private final Map<String, LinearLayout> cameraBadgeMap = new HashMap<>();
+    private final Map<String, Long> lastSnapshotRequestMs = new HashMap<>();
+    private final Set<String> activeMotionCameras = new HashSet<>();
+    private final Map<String, FrigateEvent> activeEventsById = new LinkedHashMap<>();
+    private final Map<String, String> activeReviewSeverityById = new LinkedHashMap<>();
+    private final Map<String, String> activeReviewCamById = new HashMap<>();
+    private FrigateEventsWsClient explorerWsClient;
+    private FrigateEventsWsClient.Listener explorerWsListener;
+    private long lastOngoingPollMs = 0L;
     private boolean ongoingPollInFlight = false;
     private volatile boolean isDestroyed = false;
 
@@ -127,10 +145,17 @@ public class FrigateExplorerOverlay {
         public void run() {
             if (isDestroyed) return;
             if (isOverlayVisible() && !isEventsBrowserActive) {
-                refreshAllCameraSnapshots();
-                pollOngoingEvents();
+                refreshCameraSnapshotsAdaptive();
+                long now = android.os.SystemClock.elapsedRealtime();
+                long pollInterval = (explorerWsClient != null && explorerWsClient.isConnected())
+                        ? ONGOING_RECONCILE_WS_MS
+                        : IDLE_SNAPSHOT_INTERVAL_MS;
+                if (now - lastOngoingPollMs >= pollInterval) {
+                    lastOngoingPollMs = now;
+                    pollOngoingEvents();
+                }
             }
-            mainHandler.postDelayed(this, 3000);
+            mainHandler.postDelayed(this, ADAPTIVE_TICK_MS);
         }
     };
 
@@ -260,7 +285,8 @@ public class FrigateExplorerOverlay {
         // Initial Data Loading
         loadCameras();
         loadEvents(false);
-        mainHandler.postDelayed(snapshotRefreshTask, 3000);
+        startExplorerWsClient();
+        mainHandler.postDelayed(snapshotRefreshTask, ADAPTIVE_TICK_MS);
         mainHandler.postDelayed(eventsRefreshTask, 15000);
 
         return mainPane;
@@ -272,6 +298,16 @@ public class FrigateExplorerOverlay {
         mainHandler.removeCallbacks(eventsRefreshTask);
         mainHandler.removeCallbacks(stopRefreshSpinnerRunnable);
         stopRefreshSpinnerNow();
+        if (explorerWsListener != null) {
+            FrigateEventsWsClient.releaseShared(explorerWsListener);
+            explorerWsListener = null;
+        }
+        explorerWsClient = null;
+        activeMotionCameras.clear();
+        activeEventsById.clear();
+        activeReviewSeverityById.clear();
+        activeReviewCamById.clear();
+        lastSnapshotRequestMs.clear();
         cameraPreviewMap.clear();
         cameraHighlightMap.clear();
         cameraBadgeMap.clear();
@@ -1202,7 +1238,7 @@ public class FrigateExplorerOverlay {
         card.addView(camPreview, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         cameraPreviewMap.put(camera.getName(), camPreview);
-        imageLoader.loadFresh(apiClient.getLatestFrameUrl(camera.getName()) + "?t=" + System.currentTimeMillis(), camPreview);
+        loadCameraWebpSnapshot(camera.getName(), camPreview, System.currentTimeMillis());
 
         // 2. Highlight border overlay (3dp outline matching Frigate's LivePlayer.tsx)
         View highlightBorder = new View(context);
@@ -1211,7 +1247,7 @@ public class FrigateExplorerOverlay {
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         cameraHighlightMap.put(camera.getName(), highlightBorder);
 
-        // 3. Activity pills row on Top-Right (supports multiple ongoing detected objects)
+        // 3. Activity pills row on Top-Left (matching fullscreen & thumbnail layouts)
         LinearLayout activityBadgeRow = new LinearLayout(context);
         activityBadgeRow.setOrientation(LinearLayout.HORIZONTAL);
         activityBadgeRow.setGravity(Gravity.CENTER_VERTICAL);
@@ -1219,9 +1255,9 @@ public class FrigateExplorerOverlay {
 
         FrameLayout.LayoutParams badgeLp = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
-        badgeLp.gravity = Gravity.TOP | Gravity.RIGHT;
+        badgeLp.gravity = Gravity.TOP | Gravity.LEFT;
         int margin = s(12);
-        badgeLp.setMargins(0, margin, margin, 0);
+        badgeLp.setMargins(margin, margin, 0, 0);
         card.addView(activityBadgeRow, badgeLp);
 
         cameraBadgeMap.put(camera.getName(), activityBadgeRow);
@@ -1342,10 +1378,56 @@ public class FrigateExplorerOverlay {
         return card;
     }
 
+    private void loadCameraWebpSnapshot(String cameraName, ImageView view, long nowWallMs) {
+        if (cameraName == null || view == null || apiClient == null) return;
+        int measuredH = view.getHeight();
+        int height = (measuredH > 0) ? Math.max(240, Math.min(480, measuredH)) : 320;
+        int reqW = Math.round(height * 16f / 9f);
+        String url = apiClient.getLatestWebpUrl(cameraName) + "?height=" + height + "&t=" + nowWallMs;
+        imageLoader.loadFresh(url, view, reqW, height);
+        lastSnapshotRequestMs.put(cameraName, android.os.SystemClock.elapsedRealtime());
+    }
+
+    private boolean isCameraActive(String cameraName) {
+        if (cameraName == null) return false;
+        if (activeMotionCameras.contains(cameraName)) return true;
+        for (FrigateEvent ev : activeEventsById.values()) {
+            if (ev != null && cameraName.equals(ev.getCamera())) return true;
+        }
+        for (String cam : activeReviewCamById.values()) {
+            if (cameraName.equals(cam)) return true;
+        }
+        return false;
+    }
+
+    private void refreshCameraSnapshotsAdaptive() {
+        long nowWall = System.currentTimeMillis();
+        long nowElapsed = android.os.SystemClock.elapsedRealtime();
+        for (Map.Entry<String, ImageView> entry : cameraPreviewMap.entrySet()) {
+            String cam = entry.getKey();
+            long interval = isCameraActive(cam) ? ACTIVE_SNAPSHOT_INTERVAL_MS : IDLE_SNAPSHOT_INTERVAL_MS;
+            Long last = lastSnapshotRequestMs.get(cam);
+            if (last == null || (nowElapsed - last) >= interval) {
+                loadCameraWebpSnapshot(cam, entry.getValue(), nowWall);
+            }
+        }
+    }
+
+    private void refreshCameraSnapshotIfDue(String cameraName) {
+        if (isDestroyed || !isOverlayVisible() || isEventsBrowserActive || cameraName == null) return;
+        ImageView view = cameraPreviewMap.get(cameraName);
+        if (view == null) return;
+        Long last = lastSnapshotRequestMs.get(cameraName);
+        long nowElapsed = android.os.SystemClock.elapsedRealtime();
+        if (last == null || (nowElapsed - last) >= ACTIVE_SNAPSHOT_INTERVAL_MS) {
+            loadCameraWebpSnapshot(cameraName, view, System.currentTimeMillis());
+        }
+    }
+
     private void refreshAllCameraSnapshots() {
         long now = System.currentTimeMillis();
         for (Map.Entry<String, ImageView> entry : cameraPreviewMap.entrySet()) {
-            imageLoader.loadFresh(apiClient.getLatestFrameUrl(entry.getKey()) + "?h=480&t=" + now, entry.getValue());
+            loadCameraWebpSnapshot(entry.getKey(), entry.getValue(), now);
         }
     }
 
@@ -1356,6 +1438,97 @@ public class FrigateExplorerOverlay {
                     0, 0, true, true, null, null);
             eventClickListener.onEventClick(liveCamEvent);
         }
+    }
+
+    private void startExplorerWsClient() {
+        if (explorerWsClient != null || isDestroyed) return;
+        PluginHost host = (config != null) ? config.getHost() : null;
+        explorerWsListener = new FrigateEventsWsClient.Listener() {
+            @Override
+            public void onWsConnected() {
+                if (isDestroyed) return;
+                pollOngoingEvents();
+            }
+
+            @Override
+            public void onWsDisconnected() {}
+
+            @Override
+            public void onFrigateEventMessage(String type, JSONObject afterObj, JSONObject beforeObj) {
+                if (isDestroyed || !isOverlayVisible() || isEventsBrowserActive) return;
+                handleWsEvent(type, afterObj != null ? afterObj : beforeObj);
+            }
+
+            @Override
+            public void onFrigateReviewMessage(String type, JSONObject afterObj, JSONObject beforeObj) {
+                if (isDestroyed || !isOverlayVisible() || isEventsBrowserActive) return;
+                handleWsReview(type, afterObj != null ? afterObj : beforeObj);
+            }
+
+            @Override
+            public void onFrigateMotionMessage(String camera, boolean active) {
+                if (isDestroyed || camera == null || camera.isEmpty()) return;
+                if (active) {
+                    if (activeMotionCameras.add(camera)) {
+                        refreshCameraSnapshotIfDue(camera);
+                    }
+                } else {
+                    activeMotionCameras.remove(camera);
+                }
+            }
+        };
+        explorerWsClient = FrigateEventsWsClient.acquireShared(config, host, explorerWsListener);
+    }
+
+    private void handleWsEvent(String type, JSONObject obj) {
+        if (obj == null) return;
+        String id = obj.optString("id", "");
+        String cam = obj.optString("camera", "");
+        if (id.isEmpty() || cam.isEmpty()) return;
+
+        boolean ended = "end".equalsIgnoreCase(type)
+                || obj.optBoolean("false_positive", false)
+                || (!obj.isNull("end_time") && obj.optDouble("end_time", 0) > 0);
+        if (ended) {
+            if (activeEventsById.remove(id) != null) {
+                applyOngoingEvents(new ArrayList<>(activeEventsById.values()));
+            }
+            return;
+        }
+
+        String label = obj.optString("label", "");
+        if (label.trim().isEmpty()) return;
+        String sev = obj.optString("severity", "detection");
+        double score = obj.optDouble("top_score", obj.optDouble("score", 0.0));
+        double startTime = obj.optDouble("start_time", 0.0);
+        FrigateEvent ev = new FrigateEvent(
+                id, cam, label, null, score,
+                startTime, 0.0, false, true, null, sev);
+        activeEventsById.put(id, ev);
+        applyOngoingEvents(new ArrayList<>(activeEventsById.values()));
+        refreshCameraSnapshotIfDue(cam);
+    }
+
+    private void handleWsReview(String type, JSONObject obj) {
+        if (obj == null) return;
+        String revId = obj.optString("id", "");
+        String cam = obj.optString("camera", "");
+        if (revId.isEmpty() || cam.isEmpty()) return;
+
+        boolean ended = "end".equalsIgnoreCase(type)
+                || (!obj.isNull("end_time") && obj.optDouble("end_time", 0) > 0);
+        if (ended) {
+            activeReviewSeverityById.remove(revId);
+            activeReviewCamById.remove(revId);
+            applyOngoingEvents(new ArrayList<>(activeEventsById.values()));
+            return;
+        }
+
+        String sev = obj.optString("severity", "detection");
+        activeReviewSeverityById.put(revId, sev);
+        activeReviewCamById.put(revId, cam);
+        applyOngoingEvents(new ArrayList<>(activeEventsById.values()));
+        refreshCameraSnapshotIfDue(cam);
     }
 
     private void pollOngoingEvents() {
@@ -1371,7 +1544,22 @@ public class FrigateExplorerOverlay {
                 mainHandler.post(() -> {
                     ongoingPollInFlight = false;
                     if (isDestroyed || !isOverlayVisible() || isEventsBrowserActive) return;
-                    applyOngoingEvents(events);
+                    activeEventsById.clear();
+                    if (events != null) {
+                        for (FrigateEvent ev : events) {
+                            if (ev == null) continue;
+                            String id = ev.getId();
+                            if (id == null || id.isEmpty()) {
+                                id = ev.getCamera() + ":" + ev.getLabel() + ":" + ev.getStartTime();
+                            }
+                            activeEventsById.put(id, ev);
+                        }
+                    }
+                    if (activeEventsById.isEmpty()) {
+                        activeReviewSeverityById.clear();
+                        activeReviewCamById.clear();
+                    }
+                    applyOngoingEvents(new ArrayList<>(activeEventsById.values()));
                 });
             }
 
@@ -1424,10 +1612,19 @@ public class FrigateExplorerOverlay {
 
             // Overall camera alert vs detection border
             boolean hasAlert = false;
-            for (FrigateEvent ev : camEvents) {
-                if ("alert".equalsIgnoreCase(ev.getSeverity())) {
+            for (Map.Entry<String, String> revEntry : activeReviewCamById.entrySet()) {
+                if (camName.equals(revEntry.getValue())
+                        && "alert".equalsIgnoreCase(activeReviewSeverityById.get(revEntry.getKey()))) {
                     hasAlert = true;
                     break;
+                }
+            }
+            if (!hasAlert) {
+                for (FrigateEvent ev : camEvents) {
+                    if ("alert".equalsIgnoreCase(ev.getSeverity())) {
+                        hasAlert = true;
+                        break;
+                    }
                 }
             }
             int borderAccent = hasAlert ? Color.parseColor("#F43F5E") : Color.parseColor("#F59E0B");
