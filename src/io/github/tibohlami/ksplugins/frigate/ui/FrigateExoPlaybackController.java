@@ -418,7 +418,9 @@ public class FrigateExoPlaybackController {
                 }
                 if (playbackState == Player.STATE_BUFFERING) {
                     listener.onExoBuffering(Math.max(0, player.getCurrentPosition()));
-                    android.util.Log.d("FrigatePlugin", "Frigate: [EXO] buffering at " + Math.max(0, player.getCurrentPosition()) + "ms");
+                    if (config != null && config.isDebugLogging()) {
+                        android.util.Log.d("FrigatePlugin", "Frigate: [EXO] buffering at " + Math.max(0, player.getCurrentPosition()) + "ms");
+                    }
                 } else if (playbackState == Player.STATE_READY) {
                     listener.onExoReady(player.getDuration(), exoPreferSoftware, player.isPlaying());
                 } else if (playbackState == Player.STATE_ENDED) {

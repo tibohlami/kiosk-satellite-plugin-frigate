@@ -147,6 +147,105 @@
       "title": "Mute audio by default",
       "default": false,
       "description": "Start live streams and recorded clips muted when opening the player"
+    },
+    {
+      "key": "pipDisplayMode",
+      "group": "Activity Detection Overlay (PiP)",
+      "type": "select",
+      "title": "Display activity overlay",
+      "default": "Disabled",
+      "options": [
+        "Disabled",
+        "Dashboard only",
+        "Dashboard & screensaver"
+      ],
+      "description": "Show a floating live camera overlay when matching Frigate activity occurs."
+    },
+    {
+      "key": "pipSeverity",
+      "group": "Activity Detection Overlay (PiP)",
+      "type": "select",
+      "title": "Event severity",
+      "default": "Alerts & detections",
+      "options": [
+        "Alerts only",
+        "Alerts & detections"
+      ]
+    },
+    {
+      "key": "pipPosition",
+      "group": "Activity Detection Overlay (PiP)",
+      "type": "select",
+      "title": "Overlay position",
+      "default": "Bottom right",
+      "options": [
+        "Top left",
+        "Top right",
+        "Bottom left",
+        "Bottom right"
+      ]
+    },
+    {
+      "key": "pipSizePct",
+      "group": "Activity Detection Overlay (PiP)",
+      "type": "select",
+      "title": "Overlay size",
+      "default": "Medium (35%)",
+      "options": [
+        "Small (25%)",
+        "Medium (35%)",
+        "Large (45%)"
+      ]
+    },
+    {
+      "key": "pipAutoHideSec",
+      "group": "Activity Detection Overlay (PiP)",
+      "type": "number",
+      "title": "Auto-hide timeout (seconds)",
+      "default": 30,
+      "min": 0,
+      "max": 600,
+      "description": "Automatically hide after this many seconds (0 = hide only when the event ends)."
+    },
+    {
+      "key": "pipEnableAudio",
+      "group": "Activity Detection Overlay (PiP)",
+      "type": "boolean",
+      "title": "Play audio in overlay",
+      "default": false,
+      "description": "Keep overlay muted by default when disabled."
+    },
+    {
+      "key": "pipCameras",
+      "group": "Activity Detection Overlay (PiP)",
+      "type": "list",
+      "title": "Cameras filter",
+      "default": [],
+      "description": "Only trigger for these cameras. Leave empty for all cameras.",
+      "fields": [
+        {
+          "key": "camera",
+          "type": "string",
+          "title": "Camera",
+          "choices": "plugin"
+        }
+      ]
+    },
+    {
+      "key": "pipObjects",
+      "group": "Activity Detection Overlay (PiP)",
+      "type": "list",
+      "title": "Object labels filter",
+      "default": [],
+      "description": "Only trigger for these tracked object types. Leave empty for all objects.",
+      "fields": [
+        {
+          "key": "object",
+          "type": "string",
+          "title": "Object",
+          "choices": "plugin"
+        }
+      ]
     }
   ],
   "buttons": [

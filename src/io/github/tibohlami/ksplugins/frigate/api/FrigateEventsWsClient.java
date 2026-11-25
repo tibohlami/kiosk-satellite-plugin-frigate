@@ -401,6 +401,7 @@ public final class FrigateEventsWsClient implements Closeable {
                 final String raw = root.optString("payload", "");
                 final boolean active = "ON".equalsIgnoreCase(raw.trim()) || "true".equalsIgnoreCase(raw.trim());
                 if (!cam.isEmpty()) {
+                    logDebug("Frigate: /ws motion cam=" + cam + " active=" + active);
                     mainHandler.post(() -> {
                         if (!closed) {
                             for (Listener l : listeners) l.onFrigateMotionMessage(cam, active);
@@ -420,6 +421,19 @@ public final class FrigateEventsWsClient implements Closeable {
             final String type = payload.optString("type", "");
             final JSONObject afterObj = payload.optJSONObject("after");
             final JSONObject beforeObj = payload.optJSONObject("before");
+            if (config != null && config.isDebugLogging()) {
+                JSONObject ref = afterObj != null ? afterObj : beforeObj;
+                String cam = ref != null ? ref.optString("camera", "") : "";
+                String id = ref != null ? ref.optString("id", "") : "";
+                if ("events".equals(topic)) {
+                    String lbl = ref != null ? ref.optString("label", "") : "";
+                    String sev = ref != null ? ref.optString("severity", "") : "";
+                    logDebug("Frigate: /ws event " + type + " cam=" + cam + " id=" + id + " label=" + lbl + " sev=" + sev);
+                } else {
+                    String sev = ref != null ? ref.optString("severity", "") : "";
+                    logDebug("Frigate: /ws review " + type + " cam=" + cam + " id=" + id + " sev=" + sev);
+                }
+            }
 
             mainHandler.post(() -> {
                 if (closed) return;

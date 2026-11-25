@@ -264,8 +264,7 @@ public class FrigateScrubPreviewPlayerController {
     }
 
     private void logInfo(String msg) {
-        if (host != null) host.log(msg);
-        android.util.Log.i("FrigatePlugin", msg);
+        logDebug(msg);
     }
 
     private void logDebug(String msg) {

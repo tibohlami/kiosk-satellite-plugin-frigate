@@ -468,10 +468,12 @@ public class FrigateWebStreamController {
         @JavascriptInterface
         public void onStreamLog(int sessionId, String message) {
             if (listener.isClosed() || sessionId != listener.getStreamSessionId() || message == null) return;
-            String line = "Frigate: " + message;
-            android.util.Log.d("FrigatePlugin", line);
-            if (host != null && config != null && config.isDebugLogging()) {
-                host.log(line);
+            if (config != null && config.isDebugLogging()) {
+                String line = "Frigate: " + message;
+                android.util.Log.d("FrigatePlugin", line);
+                if (host != null) {
+                    host.log(line);
+                }
             }
         }
 

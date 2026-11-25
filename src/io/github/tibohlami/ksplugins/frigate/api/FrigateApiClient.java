@@ -179,6 +179,51 @@ public class FrigateApiClient {
         } catch (RejectedExecutionException ignored) {}
     }
 
+    public void fetchTrackedObjects(Callback<List<String>> callback) {
+        if (isShutdown || executor.isShutdown()) return;
+        try {
+            executor.execute(() -> {
+                if (isShutdown) return;
+                try {
+                    String response = executeGet(config.getFrigateUrl() + "/api/config");
+                    if (isShutdown) return;
+                    java.util.Set<String> labels = new java.util.LinkedHashSet<>();
+                    JSONObject root = new JSONObject(response);
+                    JSONObject globalObjects = root.optJSONObject("objects");
+                    if (globalObjects != null) {
+                        JSONArray track = globalObjects.optJSONArray("track");
+                        if (track != null) {
+                            for (int i = 0; i < track.length(); i++) {
+                                String lbl = track.optString(i, "").trim().toLowerCase(java.util.Locale.ROOT);
+                                if (!lbl.isEmpty()) labels.add(lbl);
+                            }
+                        }
+                    }
+                    JSONObject cameras = root.optJSONObject("cameras");
+                    if (cameras != null) {
+                        java.util.Iterator<String> keys = cameras.keys();
+                        while (keys.hasNext()) {
+                            JSONObject camObj = cameras.optJSONObject(keys.next());
+                            JSONObject camObjects = camObj != null ? camObj.optJSONObject("objects") : null;
+                            JSONArray camTrack = camObjects != null ? camObjects.optJSONArray("track") : null;
+                            if (camTrack != null) {
+                                for (int i = 0; i < camTrack.length(); i++) {
+                                    String lbl = camTrack.optString(i, "").trim().toLowerCase(java.util.Locale.ROOT);
+                                    if (!lbl.isEmpty()) labels.add(lbl);
+                                }
+                            }
+                        }
+                    }
+                    callback.onSuccess(new java.util.ArrayList<>(labels));
+                } catch (Throwable e) {
+                    if (!isShutdown) {
+                        callback.onError(e instanceof Exception ? (Exception) e : new Exception(e));
+                    }
+                }
+            });
+        } catch (RejectedExecutionException ignored) {}
+    }
+
     public String getCameraPreviewMp4Url(String camera, long startSeconds, long endSeconds) {
         if (camera == null || camera.trim().isEmpty()) return null;
         return config.getFrigateUrl() + "/api/" + encodePath(camera.trim())
