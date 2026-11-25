@@ -23,6 +23,7 @@ import io.github.tibohlami.ksplugins.frigate.model.FrigateCamera;
 import io.github.tibohlami.ksplugins.frigate.model.FrigateEvent;
 import io.github.tibohlami.ksplugins.frigate.ui.AsyncImageLoader;
 import io.github.tibohlami.ksplugins.frigate.ui.FrigateExplorerOverlay;
+import io.github.tibohlami.ksplugins.frigate.ui.FrigatePipManager;
 import io.github.tibohlami.ksplugins.frigate.ui.FrigatePlayerOverlay;
 import io.github.tibohlami.ksplugins.frigate.ui.FrigateWebStreamController;
 import io.github.tibohlami.ksplugins.frigate.ui.FrigateClipCacheManager;
@@ -52,12 +53,15 @@ public final class FrigatePlugin implements KioskPlugin {
     public static final String OVERLAY_PLAYER = "frigate_player";
     private static final String ENTITY_CAMERA_SELECT = "active_camera";
     private static final String ENTITY_CAMERA_SELECT_NAME = "Active Camera";
+    private static final String ENTITY_PIP_MODE_SELECT = "activity_overlay_mode";
+    private static final String ENTITY_PIP_MODE_SELECT_NAME = "Activity Overlay Mode";
+    private static final String[] PIP_MODE_OPTIONS = new String[]{"Disabled", "Dashboard only", "Dashboard & screensaver"};
     private static final String ENTITY_CAMERAS_SUMMARY = "cameras";
     private static final String ENTITY_CAMERAS_SUMMARY_NAME = "Cameras";
     private static final String DASHBOARD_OPEN_CAMERA_PREFIX = "ks://plugin/kiosk-satellite-frigate/openCamera/";
     private static final String SELECT_OPTION_CLOSED = "Closed";
     private static final int MAX_SELECT_OPTIONS = 32;
-    private static final int MAX_CAMERA_LINK_SENSORS = 29; // Reserve slots for frigate_status, active_camera, cameras
+    private static final int MAX_CAMERA_LINK_SENSORS = 28; // Reserve slots for frigate_status, active_camera, activity_overlay_mode, cameras
     private static final int MAX_ENTITY_KEY_LENGTH = 40;
     private static final int MAX_ENTITY_NAME_LENGTH = 80;
     private static final int MAX_TEXT_SENSOR_STATE_LENGTH = 512;
@@ -71,6 +75,7 @@ public final class FrigatePlugin implements KioskPlugin {
     private boolean isPlayerOpen = false;
     private FrigateExplorerOverlay activeExplorerOverlay = null;
     private FrigatePlayerOverlay activePlayerOverlay = null;
+    private FrigatePipManager pipManager = null;
     private long explorerOverlayGeneration = 0L;
     private long playerOverlayGeneration = 0L;
     private FrigateEvent lastPlayerEvent = null;
@@ -92,7 +97,13 @@ public final class FrigatePlugin implements KioskPlugin {
         this.imageLoader.setConfig(config);
         this.imageLoader.setAuthToken(config.getAuthToken());
         this.apiClient = new FrigateApiClient(config, host);
-        this.apiClient.ensureAuthenticatedAsync(() -> refreshCameraSelectAsync());
+        this.pipManager = new FrigatePipManager(host, config, apiClient, this::openLiveCamera);
+        this.pipManager.onConfigurationChanged();
+        publishPipModeSelectState();
+        this.apiClient.ensureAuthenticatedAsync(() -> {
+            refreshCameraSelectAsync();
+            refreshPipObjectChoicesAsync();
+        });
 
         try {
             host.status(FrigateI18n.tr(null, config, "plugin_status_connected_url", config.getFrigateUrl()), false);
@@ -168,8 +179,15 @@ public final class FrigatePlugin implements KioskPlugin {
                 imageLoader.setAuthToken(config.getAuthToken());
             }
             if (apiClient != null) {
-                apiClient.ensureAuthenticatedAsync(() -> refreshCameraSelectAsync());
+                apiClient.ensureAuthenticatedAsync(() -> {
+                    refreshCameraSelectAsync();
+                    refreshPipObjectChoicesAsync();
+                });
             }
+            if (pipManager != null) {
+                pipManager.onConfigurationChanged();
+            }
+            publishPipModeSelectState();
         }
         if (languageChanged && host != null && config != null) {
             try {
@@ -275,10 +293,12 @@ public final class FrigatePlugin implements KioskPlugin {
                 if (OVERLAY_EXPLORER.equals(key)) {
                     if (activeExplorerOverlay == null || activeExplorerOverlay.isDestroyed()) {
                         isExplorerOpen = false;
+        updatePipSuppression();
                     }
                 } else if (OVERLAY_PLAYER.equals(key)) {
                     if (activePlayerOverlay == null || activePlayerOverlay.isDestroyed()) {
                         isPlayerOpen = false;
+        updatePipSuppression();
                         activeSelectCamera = SELECT_OPTION_CLOSED;
                         publishCurrentCameraSelectState();
                     }
@@ -295,6 +315,23 @@ public final class FrigatePlugin implements KioskPlugin {
                 } else {
                     publishCurrentCameraSelectState();
                 }
+            }
+        } else if (("select." + ENTITY_PIP_MODE_SELECT).equals(event) && payload != null) {
+            Object optObj = payload.get("option");
+            if (optObj instanceof String) {
+                String option = ((String) optObj).trim();
+                if (containsOption(PIP_MODE_OPTIONS, option) && config != null) {
+                    Map<String, Object> patch = Collections.<String, Object>singletonMap(
+                            FrigateConfig.KEY_PIP_DISPLAY_MODE, option);
+                    config.updateFrom(patch);
+                    try {
+                        if (host != null) host.updateSettings(patch);
+                    } catch (Exception ignored) {}
+                    if (pipManager != null) {
+                        pipManager.onConfigurationChanged();
+                    }
+                }
+                publishPipModeSelectState();
             }
         } else if ("settings.button".equals(event) && payload != null) {
             Object idObj = payload.get("id");
@@ -423,6 +460,13 @@ public final class FrigatePlugin implements KioskPlugin {
             }
         }
 
+        if (!cameraNames.isEmpty()) {
+            try {
+                String[] camArr = cameraNames.toArray(new String[0]);
+                host.setSettingChoices("pipCameras.camera", camArr, camArr);
+            } catch (UnsupportedOperationException | LinkageError | IllegalArgumentException | IllegalStateException ignored) {}
+        }
+
         String summary;
         if (cameraNames.isEmpty()) {
             summary = FrigateI18n.tr(null, config, "plugin_sensor_none");
@@ -448,6 +492,7 @@ public final class FrigatePlugin implements KioskPlugin {
         Set<String> usedKeys = new HashSet<>();
         usedKeys.add("frigate_status");
         usedKeys.add(ENTITY_CAMERA_SELECT);
+        usedKeys.add(ENTITY_PIP_MODE_SELECT);
         usedKeys.add(ENTITY_CAMERAS_SUMMARY);
 
         for (String camName : cameraNames) {
@@ -516,6 +561,43 @@ public final class FrigatePlugin implements KioskPlugin {
         return candidate;
     }
 
+    private void updatePipSuppression() {
+        if (pipManager != null) {
+            pipManager.setSuppressed(isExplorerOpen || isPlayerOpen);
+        }
+    }
+
+    private void refreshPipObjectChoicesAsync() {
+        final PluginHost activeHost = this.host;
+        final FrigateConfig activeConfig = this.config;
+        final FrigateApiClient client = this.apiClient;
+        if (activeHost == null || activeConfig == null || client == null) return;
+        client.fetchTrackedObjects(new FrigateApiClient.Callback<List<String>>() {
+            @Override
+            public void onSuccess(List<String> labels) {
+                publishObjectChoices(activeHost, activeConfig, labels);
+            }
+
+            @Override
+            public void onError(Exception error) {
+                publishObjectChoices(activeHost, activeConfig, java.util.Arrays.asList(
+                        "person", "car", "dog", "cat", "package", "bicycle", "motorcycle"));
+            }
+        });
+    }
+
+    private static void publishObjectChoices(PluginHost activeHost, FrigateConfig activeConfig, List<String> labels) {
+        if (activeHost == null || labels == null || labels.isEmpty()) return;
+        try {
+            String[] ids = labels.toArray(new String[0]);
+            String[] display = new String[ids.length];
+            for (int i = 0; i < ids.length; i++) {
+                display[i] = FrigateI18n.translateObjectLabel(null, activeConfig, ids[i]);
+            }
+            activeHost.setSettingChoices("pipObjects.object", ids, display);
+        } catch (UnsupportedOperationException | LinkageError | IllegalArgumentException | IllegalStateException ignored) {}
+    }
+
     private static String encodePathSegment(String value) {
         try {
             return URLEncoder.encode(value, StandardCharsets.UTF_8.name()).replace("+", "%20");
@@ -536,6 +618,20 @@ public final class FrigatePlugin implements KioskPlugin {
                 : SELECT_OPTION_CLOSED;
         try {
             host.publishSelect(ENTITY_CAMERA_SELECT, ENTITY_CAMERA_SELECT_NAME, cameraSelectOptions, state);
+        } catch (UnsupportedOperationException | LinkageError | IllegalArgumentException | IllegalStateException ignored) {}
+    }
+
+    private synchronized void publishPipModeSelectState() {
+        if (host == null || config == null) return;
+        String mode = config.getPipDisplayMode();
+        String state = "Disabled";
+        if ("dashboard".equals(mode)) {
+            state = "Dashboard only";
+        } else if ("both".equals(mode)) {
+            state = "Dashboard & screensaver";
+        }
+        try {
+            host.publishSelect(ENTITY_PIP_MODE_SELECT, ENTITY_PIP_MODE_SELECT_NAME, PIP_MODE_OPTIONS, state);
         } catch (UnsupportedOperationException | LinkageError | IllegalArgumentException | IllegalStateException ignored) {}
     }
 
@@ -579,6 +675,10 @@ public final class FrigatePlugin implements KioskPlugin {
         if (imageLoader != null) {
             imageLoader.shutdown();
             imageLoader = null;
+        }
+        if (pipManager != null) {
+            pipManager.stop();
+            pipManager = null;
         }
         FrigateEventsWsClient.shutdownShared();
         AsyncImageLoader.clearAllStaticCaches();
@@ -626,6 +726,7 @@ public final class FrigatePlugin implements KioskPlugin {
     private void showExplorerModal() {
         if (host == null) return;
         isExplorerOpen = true;
+        updatePipSuppression();
         final long generation = ++explorerOverlayGeneration;
 
         OverlaySpec spec = OverlaySpec.fullScreen()
@@ -636,6 +737,7 @@ public final class FrigatePlugin implements KioskPlugin {
             @Override
             public View create(Context context, KsTheme theme) {
                 isExplorerOpen = true;
+        updatePipSuppression();
                 FrigateExplorerOverlay overlay = new FrigateExplorerOverlay(
                         context,
                         theme,
@@ -668,6 +770,7 @@ public final class FrigatePlugin implements KioskPlugin {
                     if (activeExplorerOverlay == deadOverlay) {
                         activeExplorerOverlay = null;
                         isExplorerOpen = false;
+        updatePipSuppression();
                     }
                     deadOverlay.onDestroy();
                 }
@@ -680,6 +783,7 @@ public final class FrigatePlugin implements KioskPlugin {
         explorerOverlayGeneration++;
         host.hideOverlay(OVERLAY_EXPLORER);
         isExplorerOpen = false;
+        updatePipSuppression();
         if (activeExplorerOverlay != null) {
             activeExplorerOverlay.onDestroy();
             activeExplorerOverlay = null;
@@ -692,6 +796,7 @@ public final class FrigatePlugin implements KioskPlugin {
     public synchronized void showPlayerModal(FrigateEvent event) {
         if (host == null) return;
         isPlayerOpen = true;
+        updatePipSuppression();
         lastPlayerEvent = event;
         final long generation = ++playerOverlayGeneration;
         String eventCam = (event != null && event.getCamera() != null) ? event.getCamera().trim() : "";
@@ -708,6 +813,7 @@ public final class FrigatePlugin implements KioskPlugin {
             @Override
             public View create(Context context, KsTheme theme) {
                 isPlayerOpen = true;
+        updatePipSuppression();
                 FrigatePlayerOverlay player = new FrigatePlayerOverlay(
                         context,
                         theme,
@@ -739,6 +845,7 @@ public final class FrigatePlugin implements KioskPlugin {
                     if (activePlayerOverlay == deadPlayer) {
                         activePlayerOverlay = null;
                         isPlayerOpen = false;
+        updatePipSuppression();
                     }
                     deadPlayer.onDestroy();
                 }
@@ -754,6 +861,7 @@ public final class FrigatePlugin implements KioskPlugin {
         playerOverlayGeneration++;
         host.hideOverlay(OVERLAY_PLAYER);
         isPlayerOpen = false;
+        updatePipSuppression();
         lastPlayerEvent = null;
         activeSelectCamera = SELECT_OPTION_CLOSED;
         publishCurrentCameraSelectState();

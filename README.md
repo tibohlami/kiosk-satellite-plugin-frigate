@@ -13,6 +13,7 @@ Native Frigate NVR camera viewer with live streams, events & reviews browser, cl
   - Camera grid with adaptive live snapshots (faster refresh during motion/detections) and one-tap live player launch.
   - Real-time live video/audio playback.
   - Real-time object overlay pills and activity border highlights.
+  - **Activity Detection Overlay (PiP)**: Floating live camera PiP over the dashboard and/or screensaver when matching activity occurs, with tap-to-fullscreen and one-tap dismiss.
   - **ONVIF PTZ Controls**: Floating D-pad, zoom buttons, and preset pills in the live player for PTZ-capable cameras.
 - **Events & Reviews Browser**:
   - Browse recent Frigate detections, alerts, and review segments merged chronologically.
@@ -108,6 +109,18 @@ Open **Settings > Plugin Manager > Frigate NVR Explorer > Settings** in Kiosk Sa
 | **Object box time offset (s)** | `bboxTimeOffsetSec` | `1.0` | Time shift in seconds (`-5.0` to `+5.0`, step `0.25`) to align bounding boxes with recorded video (typically `+1.0` to `+2.5` s depending on camera GOP and stream latency). |
 | **Mute audio by default** | `muteAudioByDefault` | `false` | Starts live streams and recorded clips muted when opening the player. |
 
+### Activity Detection Overlay (PiP)
+| Setting | Key | Default | Description |
+| :--- | :--- | :--- | :--- |
+| **Display activity overlay** | `pipDisplayMode` | `Disabled` | Show the floating live camera overlay (`Disabled`, `Dashboard only`, or `Dashboard & screensaver`). |
+| **Event severity** | `pipSeverity` | `Alerts & detections` | Filter by `Alerts only` or `Alerts & detections`. |
+| **Overlay position** | `pipPosition` | `Bottom right` | Screen corner anchor (`Top left`, `Top right`, `Bottom left`, `Bottom right`). |
+| **Overlay size** | `pipSizePct` | `Medium (35%)` | Width as a percentage of the screen (`Small (25%)`, `Medium (35%)`, `Large (45%)`). |
+| **Auto-hide timeout (seconds)** | `pipAutoHideSec` | `30` | Automatically hide after this many seconds (`0` = hide only when the event ends). |
+| **Play audio in overlay** | `pipEnableAudio` | `false` | Keep the overlay muted by default when disabled. |
+| **Cameras filter** | `pipCameras` | `[]` | Only trigger for selected cameras (empty = all cameras). |
+| **Object labels filter** | `pipObjects` | `[]` | Only trigger for selected tracked object labels (empty = all objects). |
+
 ---
 
 ## Home Assistant Integration
@@ -122,7 +135,8 @@ Open **Settings > Plugin Manager > Frigate NVR Explorer > Settings** in Kiosk Sa
 - `frigate_status` *(text sensor)*: Connection status (`Connected` / `Error`).
 - `cameras` *(text sensor)*: Count and list of discovered Frigate cameras.
 - `active_camera` *(select)*: Switch the live camera overlay directly from Home Assistant (`Closed` or any discovered camera name).
-- `cam_<camera_name>` *(text sensors)*: Dashboard shortcut URIs (`ks://plugin/kiosk-satellite-frigate/openCamera/<camera>`) for each camera (up to 29 cameras).
+- `activity_overlay_mode` *(select)*: Enable, disable, or change the Activity Detection Overlay mode from Home Assistant (`Disabled`, `Dashboard only`, `Dashboard & screensaver`).
+- `cam_<camera_name>` *(text sensors)*: Dashboard shortcut URIs (`ks://plugin/kiosk-satellite-frigate/openCamera/<camera>`) for each camera (up to 28 cameras).
 
 ---
 

@@ -2322,8 +2322,10 @@ public class FrigatePlayerOverlay {
                                 activePreviewFallbackUrl = staticUrl;
                                 activePreviewClipStartMs = clipStartMs;
                                 activePreviewClipEndMs = clipEndMs;
-                                android.util.Log.i("FrigatePlugin", "Streaming ExoPlayer static preview MP4: " + staticUrl
-                                        + " [" + clipStartMs + "ms.." + clipEndMs + "ms]");
+                                if (config != null && config.isDebugLogging()) {
+                                    android.util.Log.i("FrigatePlugin", "Streaming ExoPlayer static preview MP4: " + staticUrl
+                                            + " [" + clipStartMs + "ms.." + clipEndMs + "ms]");
+                                }
                                 exoController.startPreview(sessionId, staticUrl, clipStartMs, clipEndMs, 8.0f);
                             });
                         }
@@ -3030,10 +3032,12 @@ public class FrigatePlayerOverlay {
             String hlsUrl = buildVodHlsUrl();
             clipCacheManager.clearCurrentCachedFilePath();
             updateTransportModeBadge("EXO...", "#38BDF8", "#0C2135", "#0284C7");
-            if (host != null) {
-                host.log("Frigate: Streaming ExoPlayer HLS VOD: " + hlsUrl);
+            if (config != null && config.isDebugLogging()) {
+                if (host != null) {
+                    host.log("Frigate: Streaming ExoPlayer HLS VOD: " + hlsUrl);
+                }
+                android.util.Log.i("FrigatePlugin", "Streaming ExoPlayer HLS VOD: " + hlsUrl);
             }
-            android.util.Log.i("FrigatePlugin", "Streaming ExoPlayer HLS VOD: " + hlsUrl);
             exoController.start(sessionId, hlsUrl, isMuted);
             return;
         }
@@ -3044,10 +3048,12 @@ public class FrigatePlayerOverlay {
             isHlsPlayback = true;
             clipCacheManager.clearCurrentCachedFilePath();
             updateTransportModeBadge("HLS...", "#94A3B8", "#161D2B", "#334155");
-            if (host != null) {
-                host.log("Frigate: Streaming hls.js VOD: " + hlsUrl);
+            if (config != null && config.isDebugLogging()) {
+                if (host != null) {
+                    host.log("Frigate: Streaming hls.js VOD: " + hlsUrl);
+                }
+                android.util.Log.i("FrigatePlugin", "Streaming hls.js VOD: " + hlsUrl);
             }
-            android.util.Log.i("FrigatePlugin", "Streaming hls.js VOD: " + hlsUrl);
             startHlsWebView(sessionId, hlsUrl);
             return;
         }
