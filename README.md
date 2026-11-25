@@ -123,20 +123,28 @@ Open **Settings > Plugin Manager > Frigate NVR Explorer > Settings** in Kiosk Sa
 
 ---
 
-## Home Assistant Integration
+## Plugin Actions
 
-### Plugin Commands
+Plugin actions can be triggered from **Kiosk Satellite gestures/shortcuts**, **HA buttons** (if enabled in plugin config), or **dashboard links** (`ks://plugin/kiosk-satellite-frigate/<command>`).
+
 - `showExplorer`: Opens the Frigate cameras & events browser overlay.
 - `hideExplorer`: Closes the Frigate browser overlay.
-- `openCamera`: Opens a live camera stream overlay (`camera` argument or first item in `args`; falls back to the first discovered camera).
+- `openCamera`: Opens a live camera stream overlay (`camera` argument or first item in `args`, e.g. `ks://plugin/kiosk-satellite-frigate/openCamera/<camera>`; falls back to the first discovered camera).
 - `hidePlayer`: Closes the active camera/event player overlay.
+- `showCameraPipOverlay`: Shows the floating PiP camera overlay above the dashboard/screensaver (`camera` or `args[0]`, e.g. `ks://plugin/kiosk-satellite-frigate/showCameraPipOverlay/<camera>`). When called programmatically with an arguments map, also supports optional `position`, `size` (`small`/`medium`/`large`/`<N>%`/`<W>x<H>`), `duration` (seconds), `layer` (`dashboard`/`top`), and `audio` (boolean) overrides.
+- `hideCameraPipOverlay`: Immediately dismisses the active PiP camera overlay.
+
+---
+
+## Home Assistant Integration
 
 ### Published Entities
 - `frigate_status` *(text sensor)*: Connection status (`Connected` / `Error`).
 - `cameras` *(text sensor)*: Count and list of discovered Frigate cameras.
 - `active_camera` *(select)*: Switch the live camera overlay directly from Home Assistant (`Closed` or any discovered camera name).
-- `activity_overlay_mode` *(select)*: Enable, disable, or change the Activity Detection Overlay mode from Home Assistant (`Disabled`, `Dashboard only`, `Dashboard & screensaver`).
-- `cam_<camera_name>` *(text sensors)*: Dashboard shortcut URIs (`ks://plugin/kiosk-satellite-frigate/openCamera/<camera>`) for each camera (up to 28 cameras).
+- `active_pip_camera` *(select)*: Show or dismiss a floating PiP camera overlay directly from Home Assistant (`Closed` or any discovered camera name).
+- `activity_overlay_mode` *(select)*: Enable, disable, or change the Activity PiP Overlay mode from Home Assistant (`Disabled`, `Dashboard only`, `Dashboard & screensaver`).
+- `cam_<camera_name>` *(text sensors)*: Dashboard shortcut URIs (`ks://plugin/kiosk-satellite-frigate/openCamera/<camera>`) for each camera (up to 27 cameras).
 
 ---
 

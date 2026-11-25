@@ -32,6 +32,7 @@ public class FrigatePipManager {
 
     public interface HostBridge {
         void openCameraLive(String cameraName);
+        void onActivePipCameraChanged(String cameraName);
     }
 
     private static final String OVERLAY_PIP = "frigate_event_pip";
@@ -89,6 +90,13 @@ public class FrigatePipManager {
     private FrigatePipOverlayView activePipView = null;
     private long pipGeneration = 0L;
 
+    private String manualCamera = null;
+    private String manualPositionOverride = null;
+    private String manualSizeOverride = null;
+    private Integer manualDurationSecOverride = null;
+    private String manualLayerOverride = null;
+    private Boolean manualAudioOverride = null;
+
     private final Runnable autoHideRunnable = this::dismissCurrentPip;
 
     public FrigatePipManager(PluginHost host,
@@ -126,11 +134,59 @@ public class FrigatePipManager {
             if (this.suppressed == suppressed) return;
             this.suppressed = suppressed;
             if (suppressed) {
+                clearManualState();
                 hideOverlay();
             } else if (started) {
                 evaluateState();
             }
         });
+    }
+
+    public void showManualOverlay(final String camera,
+                                  final String positionOverride,
+                                  final String sizeOverride,
+                                  final Integer durationSecOverride,
+                                  final String layerOverride,
+                                  final Boolean audioOverride) {
+        if (host == null || host.isHeadless() || camera == null || camera.trim().isEmpty()) return;
+        mainHandler.post(() -> {
+            if (host == null || host.isHeadless()) return;
+            if (suppressed) {
+                clearManualState();
+                if (bridge != null) {
+                    bridge.onActivePipCameraChanged(null);
+                }
+                return;
+            }
+            manualCamera = camera.trim();
+            manualPositionOverride = (positionOverride != null && !positionOverride.trim().isEmpty())
+                    ? positionOverride.trim() : null;
+            manualSizeOverride = (sizeOverride != null && !sizeOverride.trim().isEmpty())
+                    ? sizeOverride.trim() : null;
+            manualDurationSecOverride = (durationSecOverride != null && durationSecOverride >= 0)
+                    ? Math.min(600, durationSecOverride) : null;
+            manualLayerOverride = (layerOverride != null && !layerOverride.trim().isEmpty())
+                    ? layerOverride.trim() : null;
+            manualAudioOverride = audioOverride;
+            lastOverlaySignature = "";
+            evaluateState();
+        });
+    }
+
+    public void hideManualOverlay() {
+        mainHandler.post(() -> {
+            clearManualState();
+            hideOverlay();
+        });
+    }
+
+    private void clearManualState() {
+        manualCamera = null;
+        manualPositionOverride = null;
+        manualSizeOverride = null;
+        manualDurationSecOverride = null;
+        manualLayerOverride = null;
+        manualAudioOverride = null;
     }
 
     public void start() {
@@ -180,6 +236,7 @@ public class FrigatePipManager {
 
     private void stopOnMainThread() {
         started = false;
+        clearManualState();
         mainHandler.removeCallbacksAndMessages(null);
         if (wsListener != null) {
             FrigateEventsWsClient.releaseShared(wsListener);
@@ -268,7 +325,34 @@ public class FrigatePipManager {
     }
 
     private void evaluateState() {
-        if (!started || suppressed || "none".equals(config.getPipDisplayMode())) {
+        if (suppressed) {
+            hideOverlay();
+            return;
+        }
+
+        if (manualCamera != null) {
+            Map<String, CameraSummary> matching = buildMatchingSummaries();
+            CameraSummary chosen = matching.get(manualCamera);
+            if (chosen == null) {
+                chosen = new CameraSummary(manualCamera);
+            }
+            int extraCameras = Math.max(0, matching.size() - (matching.containsKey(manualCamera) ? 1 : 0));
+            String resolvedPos = resolvePosition(manualPositionOverride);
+            String resolvedSize = (manualSizeOverride != null) ? manualSizeOverride : config.getPipSize();
+            String resolvedLayer = resolveLayer(manualLayerOverride);
+            boolean resolvedAudio = (manualAudioOverride != null) ? manualAudioOverride : config.isPipEnableAudio();
+            String specSig = "manual|" + resolvedLayer + "|" + resolvedPos + "|" + resolvedSize + "|" + resolvedAudio;
+            if (manualCamera.equals(currentPipCamera)
+                    && activePipView != null
+                    && specSig.equals(lastOverlaySignature)) {
+                activePipView.updateActivity(chosen.hasAlert, chosen.labels, extraCameras);
+            } else {
+                showOverlayForSummary(chosen, extraCameras, specSig, resolvedPos, resolvedSize, resolvedLayer, resolvedAudio);
+            }
+            return;
+        }
+
+        if (!started || "none".equals(config.getPipDisplayMode())) {
             hideOverlay();
             return;
         }
@@ -285,15 +369,18 @@ public class FrigatePipManager {
         }
         int extraCameras = Math.max(0, matching.size() - 1);
 
-        String specSig = config.getPipDisplayMode() + "|" + config.getPipPosition() + "|"
-                + config.getPipSize() + "|" + config.isPipEnableAudio();
+        String resolvedPos = resolvePosition(null);
+        String resolvedSize = config.getPipSize();
+        String resolvedLayer = resolveLayer(null);
+        boolean resolvedAudio = config.isPipEnableAudio();
+        String specSig = config.getPipDisplayMode() + "|" + resolvedPos + "|" + resolvedSize + "|" + resolvedAudio;
 
         if (chosen.camera.equals(currentPipCamera)
                 && activePipView != null
                 && specSig.equals(lastOverlaySignature)) {
             activePipView.updateActivity(chosen.hasAlert, chosen.labels, extraCameras);
         } else {
-            showOverlayForSummary(chosen, extraCameras, specSig);
+            showOverlayForSummary(chosen, extraCameras, specSig, resolvedPos, resolvedSize, resolvedLayer, resolvedAudio);
         }
     }
 
@@ -330,37 +417,98 @@ public class FrigatePipManager {
         return summaries;
     }
 
-    private void showOverlayForSummary(CameraSummary summary, int extraCameras, String specSig) {
+    private String resolvePosition(String override) {
+        String raw = (override != null ? override : config.getPipPosition())
+                .trim().toLowerCase(Locale.ROOT).replace('_', '-').replace(' ', '-');
+        if ("top-left".equals(raw) || "top-right".equals(raw)
+                || "bottom-left".equals(raw) || "bottom-right".equals(raw)
+                || "top".equals(raw) || "bottom".equals(raw)
+                || "left".equals(raw) || "right".equals(raw)
+                || "center".equals(raw)) {
+            return raw;
+        }
+        return config.getPipPosition();
+    }
+
+    private String resolveLayer(String override) {
+        if (override != null) {
+            String raw = override.trim().toLowerCase(Locale.ROOT);
+            if ("top".equals(raw) || "both".equals(raw) || "screensaver".equals(raw) || "true".equals(raw)) {
+                return OverlaySpec.LAYER_TOP;
+            }
+            if ("views".equals(raw)) {
+                return OverlaySpec.LAYER_VIEWS;
+            }
+            if ("dashboard".equals(raw) || "false".equals(raw)) {
+                return OverlaySpec.LAYER_DASHBOARD;
+            }
+        }
+        return "both".equals(config.getPipDisplayMode())
+                ? OverlaySpec.LAYER_TOP
+                : OverlaySpec.LAYER_DASHBOARD;
+    }
+
+    private int[] resolveSizeDp(String sizeSpec) {
+        android.util.DisplayMetrics dm = android.content.res.Resources.getSystem().getDisplayMetrics();
+        float density = (dm != null && dm.density > 0f) ? dm.density : 1.0f;
+        float screenWDp = (dm != null && dm.widthPixels > 0) ? (dm.widthPixels / density) : 1024f;
+        float screenHDp = (dm != null && dm.heightPixels > 0) ? (dm.heightPixels / density) : 600f;
+        int maxHDp = Math.max(140, Math.round(screenHDp * 0.75f));
+
+        String raw = (sizeSpec != null ? sizeSpec : "medium").trim().toLowerCase(Locale.ROOT);
+        int xIdx = raw.indexOf('x');
+        if (xIdx > 0 && xIdx < raw.length() - 1) {
+            try {
+                int w = Integer.parseInt(raw.substring(0, xIdx).replaceAll("[^0-9]", ""));
+                int h = Integer.parseInt(raw.substring(xIdx + 1).replaceAll("[^0-9]", ""));
+                w = Math.max(180, Math.min(1200, w));
+                h = Math.max(100, Math.min(maxHDp, h));
+                return new int[]{w, h};
+            } catch (Exception ignored) {}
+        }
+
+        float pct = 0.35f;
+        if (raw.startsWith("small")) {
+            pct = 0.25f;
+        } else if (raw.startsWith("large")) {
+            pct = 0.45f;
+        } else {
+            String digits = raw.replace("%", "").trim();
+            try {
+                float parsed = Float.parseFloat(digits);
+                if (parsed >= 10f && parsed <= 85f) {
+                    pct = parsed / 100f;
+                }
+            } catch (Exception ignored) {}
+        }
+
+        int wDp = Math.round(screenWDp * pct);
+        wDp = Math.max(200, Math.min(900, wDp));
+        int hDp = Math.round(wDp * 9f / 16f);
+        if (hDp > maxHDp) {
+            hDp = maxHDp;
+            wDp = Math.round(hDp * 16f / 9f);
+        }
+        return new int[]{wDp, hDp};
+    }
+
+    private void showOverlayForSummary(CameraSummary summary,
+                                       int extraCameras,
+                                       String specSig,
+                                       String position,
+                                       String sizeSpec,
+                                       String layer,
+                                       boolean enableAudio) {
         if (host == null) return;
         currentPipCamera = summary.camera;
         lastOverlaySignature = specSig;
         final long gen = ++pipGeneration;
 
-        float pct = 0.35f;
-        String size = config.getPipSize();
-        if ("small".equals(size)) {
-            pct = 0.25f;
-        } else if ("large".equals(size)) {
-            pct = 0.45f;
-        }
-        android.util.DisplayMetrics dm = android.content.res.Resources.getSystem().getDisplayMetrics();
-        float density = (dm != null && dm.density > 0f) ? dm.density : 1.0f;
-        float screenWDp = (dm != null && dm.widthPixels > 0) ? (dm.widthPixels / density) : 1024f;
-        float screenHDp = (dm != null && dm.heightPixels > 0) ? (dm.heightPixels / density) : 600f;
-        int wDp = Math.round(screenWDp * pct);
-        wDp = Math.max(220, Math.min(800, wDp));
-        int hDp = Math.round(wDp * 9f / 16f);
-        int maxHDp = Math.max(140, Math.round(screenHDp * 0.75f));
-        if (hDp > maxHDp) {
-            hDp = maxHDp;
-            wDp = Math.round(hDp * 16f / 9f);
-        }
+        int[] dims = resolveSizeDp(sizeSpec);
+        int wDp = dims[0];
+        int hDp = dims[1];
 
-        String layer = "both".equals(config.getPipDisplayMode())
-                ? OverlaySpec.LAYER_TOP
-                : OverlaySpec.LAYER_DASHBOARD;
-
-        OverlaySpec spec = OverlaySpec.at(config.getPipPosition())
+        OverlaySpec spec = OverlaySpec.at(position)
                 .size(wDp, hDp)
                 .inset(16)
                 .layer(layer)
@@ -377,6 +525,9 @@ public class FrigatePipManager {
         logDebug("Frigate: Activity overlay show cam=" + targetCamera
                 + " size=" + wDp + "x" + hDp + "dp layer=" + layer
                 + " alert=" + initialAlert + " extra=" + initialExtra);
+        if (bridge != null) {
+            bridge.onActivePipCameraChanged(targetCamera);
+        }
         host.showOverlay(OVERLAY_PIP, spec, new OverlayFactory() {
             @Override
             public View create(Context context, KsTheme theme) {
@@ -386,6 +537,7 @@ public class FrigatePipManager {
                             @Override
                             public void onOpenCamera(String cameraName) {
                                 suppressed = true;
+                                clearManualState();
                                 hideOverlay();
                                 if (bridge != null) {
                                     bridge.openCameraLive(cameraName);
@@ -397,6 +549,7 @@ public class FrigatePipManager {
                                 dismissCurrentPip();
                             }
                         });
+                view.setAudioOverride(enableAudio);
                 if (gen == pipGeneration) {
                     activePipView = view;
                 }
@@ -431,13 +584,22 @@ public class FrigatePipManager {
 
     private void resetAutoHideTimer() {
         mainHandler.removeCallbacks(autoHideRunnable);
-        int timeoutSec = config.getPipAutoHideSec();
-        if (timeoutSec > 0 && started && !suppressed) {
+        int timeoutSec = (manualCamera != null && manualDurationSecOverride != null)
+                ? manualDurationSecOverride
+                : config.getPipAutoHideSec();
+        if (timeoutSec > 0 && (started || manualCamera != null) && !suppressed) {
             mainHandler.postDelayed(autoHideRunnable, timeoutSec * 1000L);
         }
     }
 
     private void dismissCurrentPip() {
+        if (manualCamera != null) {
+            logDebug("Frigate: Manual activity overlay dismissed for cam=" + manualCamera);
+            clearManualState();
+            currentPipCamera = null;
+            evaluateState();
+            return;
+        }
         if (currentPipCamera != null) {
             logDebug("Frigate: Activity overlay dismissed for cam=" + currentPipCamera);
             for (ActiveEvent ev : activeEventsById.values()) {
@@ -456,7 +618,8 @@ public class FrigatePipManager {
     }
 
     private void hideOverlay() {
-        if (currentPipCamera != null || activePipView != null) {
+        boolean hadActive = (currentPipCamera != null || activePipView != null);
+        if (hadActive) {
             logDebug("Frigate: Activity overlay hidden");
         }
         mainHandler.removeCallbacks(autoHideRunnable);
@@ -471,6 +634,9 @@ public class FrigatePipManager {
         if (activePipView != null) {
             activePipView.destroy();
             activePipView = null;
+        }
+        if (hadActive && bridge != null) {
+            bridge.onActivePipCameraChanged(null);
         }
     }
 

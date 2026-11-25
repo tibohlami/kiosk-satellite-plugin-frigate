@@ -55,15 +55,17 @@ public final class FrigatePlugin implements KioskPlugin {
     public static final String OVERLAY_PLAYER = "frigate_player";
     private static final String ENTITY_CAMERA_SELECT = "active_camera";
     private static final String ENTITY_CAMERA_SELECT_NAME = "Active Camera";
+    private static final String ENTITY_PIP_CAMERA_SELECT = "active_pip_camera";
+    private static final String ENTITY_PIP_CAMERA_SELECT_NAME = "Active PiP Camera";
     private static final String ENTITY_PIP_MODE_SELECT = "activity_overlay_mode";
-    private static final String ENTITY_PIP_MODE_SELECT_NAME = "Activity Overlay Mode";
+    private static final String ENTITY_PIP_MODE_SELECT_NAME = "Activity PiP Overlay Mode";
     private static final String[] PIP_MODE_OPTIONS = new String[]{"Disabled", "Dashboard only", "Dashboard & screensaver"};
     private static final String ENTITY_CAMERAS_SUMMARY = "cameras";
     private static final String ENTITY_CAMERAS_SUMMARY_NAME = "Cameras";
     private static final String DASHBOARD_OPEN_CAMERA_PREFIX = "ks://plugin/kiosk-satellite-frigate/openCamera/";
     private static final String SELECT_OPTION_CLOSED = "Closed";
     private static final int MAX_SELECT_OPTIONS = 32;
-    private static final int MAX_CAMERA_LINK_SENSORS = 28; // Reserve slots for frigate_status, active_camera, activity_overlay_mode, cameras
+    private static final int MAX_CAMERA_LINK_SENSORS = 27; // Reserve slots for frigate_status, active_camera, active_pip_camera, activity_overlay_mode, cameras
     private static final int MAX_ENTITY_KEY_LENGTH = 40;
     private static final int MAX_ENTITY_NAME_LENGTH = 80;
     private static final int MAX_TEXT_SENSOR_STATE_LENGTH = 512;
@@ -84,6 +86,7 @@ public final class FrigatePlugin implements KioskPlugin {
     private FrigateEvent lastPlayerEvent = null;
     private String[] cameraSelectOptions = null;
     private String activeSelectCamera = SELECT_OPTION_CLOSED;
+    private String activeSelectPipCamera = SELECT_OPTION_CLOSED;
     private final Map<String, String> publishedCameraSensors = new LinkedHashMap<>();
     private final Set<String> canceledSetupRuns = Collections.synchronizedSet(new HashSet<String>());
 
@@ -100,7 +103,25 @@ public final class FrigatePlugin implements KioskPlugin {
         this.imageLoader.setConfig(config);
         this.imageLoader.setAuthToken(config.getAuthToken());
         this.apiClient = new FrigateApiClient(config, host);
-        this.pipManager = new FrigatePipManager(host, config, apiClient, this::openLiveCamera);
+        this.pipManager = new FrigatePipManager(host, config, apiClient, new FrigatePipManager.HostBridge() {
+            @Override
+            public void openCameraLive(String cameraName) {
+                openLiveCamera(cameraName);
+            }
+
+            @Override
+            public void onActivePipCameraChanged(String cameraName) {
+                synchronized (FrigatePlugin.this) {
+                    String next = (cameraName != null && !cameraName.trim().isEmpty())
+                            ? cameraName.trim()
+                            : SELECT_OPTION_CLOSED;
+                    if (!next.equals(activeSelectPipCamera)) {
+                        activeSelectPipCamera = next;
+                        publishCurrentPipCameraSelectState();
+                    }
+                }
+            }
+        });
         this.pipManager.onConfigurationChanged();
         publishPipModeSelectState();
         this.apiClient.ensureAuthenticatedAsync(() -> {
@@ -226,7 +247,73 @@ public final class FrigatePlugin implements KioskPlugin {
             hidePlayerModal();
         } else if ("openCamera".equals(command)) {
             openLiveCamera(extractCameraArgument(arguments));
+        } else if ("showCameraPipOverlay".equals(command)) {
+            showCameraOverlayCommand(arguments);
+        } else if ("hideCameraPipOverlay".equals(command)) {
+            if (pipManager != null) {
+                pipManager.hideManualOverlay();
+            }
         }
+    }
+
+    private synchronized void showCameraOverlayCommand(Map<String, Object> arguments) {
+        if (config == null || host == null || pipManager == null) return;
+        String cam = resolveCameraOrDefault(extractCameraArgument(arguments));
+        if (cam == null || cam.isEmpty()) return;
+
+        String pos = getOptionalStringArg(arguments, "position");
+        String size = getOptionalStringArg(arguments, "size");
+        if (size == null) size = getOptionalStringArg(arguments, "size_pct");
+        Integer duration = getOptionalIntArg(arguments, "duration");
+        if (duration == null) duration = getOptionalIntArg(arguments, "timeout");
+        String layer = getOptionalStringArg(arguments, "layer");
+        if (layer == null) layer = getOptionalStringArg(arguments, "screensaver");
+        Boolean audio = getOptionalBoolArg(arguments, "audio");
+
+        pipManager.showManualOverlay(cam, pos, size, duration, layer, audio);
+    }
+
+    private String resolveCameraOrDefault(String requestedCamera) {
+        String cam = (requestedCamera != null) ? requestedCamera.trim() : "";
+        if (cam.isEmpty() && config != null) {
+            cam = config.getDefaultCamera();
+        }
+        if ((cam == null || cam.isEmpty()) && cameraSelectOptions != null && cameraSelectOptions.length > 1) {
+            cam = cameraSelectOptions[1];
+        }
+        return (cam != null && !cam.trim().isEmpty()) ? cam.trim() : null;
+    }
+
+    private static String getOptionalStringArg(Map<String, Object> arguments, String key) {
+        if (arguments == null) return null;
+        Object val = arguments.get(key);
+        if (val == null) return null;
+        String s = String.valueOf(val).trim();
+        return s.isEmpty() ? null : s;
+    }
+
+    private static Integer getOptionalIntArg(Map<String, Object> arguments, String key) {
+        if (arguments == null) return null;
+        Object val = arguments.get(key);
+        if (val instanceof Number) return ((Number) val).intValue();
+        if (val != null) {
+            try {
+                return (int) Math.round(Double.parseDouble(String.valueOf(val).trim()));
+            } catch (Exception ignored) {}
+        }
+        return null;
+    }
+
+    private static Boolean getOptionalBoolArg(Map<String, Object> arguments, String key) {
+        if (arguments == null) return null;
+        Object val = arguments.get(key);
+        if (val instanceof Boolean) return (Boolean) val;
+        if (val != null) {
+            String s = String.valueOf(val).trim().toLowerCase(Locale.ROOT);
+            if ("true".equals(s)) return true;
+            if ("false".equals(s)) return false;
+        }
+        return null;
     }
 
     private String extractCameraArgument(Map<String, Object> arguments) {
@@ -318,6 +405,22 @@ public final class FrigatePlugin implements KioskPlugin {
                     openLiveCamera(option);
                 } else {
                     publishCurrentCameraSelectState();
+                }
+            }
+        } else if (("select." + ENTITY_PIP_CAMERA_SELECT).equals(event) && payload != null) {
+            Object optObj = payload.get("option");
+            if (optObj instanceof String) {
+                String option = ((String) optObj).trim();
+                if (SELECT_OPTION_CLOSED.equals(option)) {
+                    if (pipManager != null) {
+                        pipManager.hideManualOverlay();
+                    }
+                } else if (containsOption(cameraSelectOptions, option)) {
+                    if (pipManager != null) {
+                        pipManager.showManualOverlay(option, null, null, null, null, null);
+                    }
+                } else {
+                    publishCurrentPipCameraSelectState();
                 }
             }
         } else if (("select." + ENTITY_PIP_MODE_SELECT).equals(event) && payload != null) {
@@ -447,8 +550,12 @@ public final class FrigatePlugin implements KioskPlugin {
         if (!isPlayerOpen || !containsOption(nextOptions, activeSelectCamera)) {
             activeSelectCamera = SELECT_OPTION_CLOSED;
         }
+        if (!containsOption(nextOptions, activeSelectPipCamera)) {
+            activeSelectPipCamera = SELECT_OPTION_CLOSED;
+        }
         if (optionsChanged) {
             publishCurrentCameraSelectState();
+            publishCurrentPipCameraSelectState();
         }
     }
 
@@ -496,6 +603,7 @@ public final class FrigatePlugin implements KioskPlugin {
         Set<String> usedKeys = new HashSet<>();
         usedKeys.add("frigate_status");
         usedKeys.add(ENTITY_CAMERA_SELECT);
+        usedKeys.add(ENTITY_PIP_CAMERA_SELECT);
         usedKeys.add(ENTITY_PIP_MODE_SELECT);
         usedKeys.add(ENTITY_CAMERAS_SUMMARY);
 
@@ -625,6 +733,16 @@ public final class FrigatePlugin implements KioskPlugin {
         } catch (UnsupportedOperationException | LinkageError | IllegalArgumentException | IllegalStateException ignored) {}
     }
 
+    private synchronized void publishCurrentPipCameraSelectState() {
+        if (host == null || cameraSelectOptions == null || cameraSelectOptions.length == 0) return;
+        String state = containsOption(cameraSelectOptions, activeSelectPipCamera)
+                ? activeSelectPipCamera
+                : SELECT_OPTION_CLOSED;
+        try {
+            host.publishSelect(ENTITY_PIP_CAMERA_SELECT, ENTITY_PIP_CAMERA_SELECT_NAME, cameraSelectOptions, state);
+        } catch (UnsupportedOperationException | LinkageError | IllegalArgumentException | IllegalStateException ignored) {}
+    }
+
     private synchronized void publishPipModeSelectState() {
         if (host == null || config == null) return;
         String mode = config.getPipDisplayMode();
@@ -698,6 +816,7 @@ public final class FrigatePlugin implements KioskPlugin {
         this.lastPlayerEvent = null;
         this.cameraSelectOptions = null;
         this.activeSelectCamera = SELECT_OPTION_CLOSED;
+        this.activeSelectPipCamera = SELECT_OPTION_CLOSED;
         this.publishedCameraSensors.clear();
         this.canceledSetupRuns.clear();
     }
