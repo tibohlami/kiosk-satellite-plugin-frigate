@@ -4,6 +4,8 @@ package io.github.tibohlami.ksplugins.frigate;
 import io.github.tibohlami.ksplugins.frigate.ui.FrigateI18n;
 
 import android.content.Context;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.ImageView;
@@ -76,6 +78,7 @@ public final class FrigatePlugin implements KioskPlugin {
     private FrigateExplorerOverlay activeExplorerOverlay = null;
     private FrigatePlayerOverlay activePlayerOverlay = null;
     private FrigatePipManager pipManager = null;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private long explorerOverlayGeneration = 0L;
     private long playerOverlayGeneration = 0L;
     private FrigateEvent lastPlayerEvent = null;
@@ -204,7 +207,8 @@ public final class FrigatePlugin implements KioskPlugin {
         } else {
             if (showLatestEventsChanged && isExplorerOpen
                     && activeExplorerOverlay != null && !activeExplorerOverlay.isDestroyed()) {
-                activeExplorerOverlay.onShowLatestEventsChanged();
+                final FrigateExplorerOverlay exp = activeExplorerOverlay;
+                runOnMainThread(exp::onShowLatestEventsChanged);
             }
             if (pillChanged && isPlayerOpen && lastPlayerEvent != null) {
                 showPlayerModal(lastPlayerEvent);
@@ -784,9 +788,10 @@ public final class FrigatePlugin implements KioskPlugin {
         host.hideOverlay(OVERLAY_EXPLORER);
         isExplorerOpen = false;
         updatePipSuppression();
-        if (activeExplorerOverlay != null) {
-            activeExplorerOverlay.onDestroy();
-            activeExplorerOverlay = null;
+        final FrigateExplorerOverlay deadExplorer = activeExplorerOverlay;
+        activeExplorerOverlay = null;
+        if (deadExplorer != null) {
+            runOnMainThread(deadExplorer::onDestroy);
         }
     }
 
@@ -865,12 +870,24 @@ public final class FrigatePlugin implements KioskPlugin {
         lastPlayerEvent = null;
         activeSelectCamera = SELECT_OPTION_CLOSED;
         publishCurrentCameraSelectState();
-        if (activePlayerOverlay != null) {
-            activePlayerOverlay.onDestroy();
-            activePlayerOverlay = null;
-        }
-        if (activeExplorerOverlay != null && !activeExplorerOverlay.isDestroyed()) {
-            activeExplorerOverlay.onResumeFromPlayer();
+        final FrigatePlayerOverlay deadPlayer = activePlayerOverlay;
+        activePlayerOverlay = null;
+        final FrigateExplorerOverlay explorer = activeExplorerOverlay;
+        runOnMainThread(() -> {
+            if (deadPlayer != null) {
+                deadPlayer.onDestroy();
+            }
+            if (explorer != null && !explorer.isDestroyed()) {
+                explorer.onResumeFromPlayer();
+            }
+        });
+    }
+
+    private void runOnMainThread(Runnable r) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            r.run();
+        } else {
+            mainHandler.post(r);
         }
     }
 
