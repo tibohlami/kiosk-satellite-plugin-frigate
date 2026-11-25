@@ -57,6 +57,7 @@ public class FrigatePipOverlayView {
     private String lastBadgesKey = "";
     private volatile boolean destroyed = false;
     private volatile int streamSessionId = 1;
+    private Boolean audioOverride;
 
     public FrigatePipOverlayView(Context context,
                                  KsTheme theme,
@@ -126,6 +127,10 @@ public class FrigatePipOverlayView {
 
     public String getCameraName() {
         return cameraName;
+    }
+
+    public void setAudioOverride(Boolean audioOverride) {
+        this.audioOverride = audioOverride;
     }
 
     public View buildView(boolean hasAlert, Set<String> labels, int extraActiveCameras) {
@@ -256,10 +261,13 @@ public class FrigatePipOverlayView {
 
     public void updateActivity(boolean hasAlert, Set<String> labels, int extraActiveCameras) {
         if (destroyed) return;
-        String borderKey = hasAlert ? "alert" : "detection";
+        boolean hasLabels = labels != null && !labels.isEmpty();
+        String borderKey = hasAlert ? "alert" : (hasLabels ? "detection" : "manual");
         if (borderOverlay != null && !borderKey.equals(lastBorderKey)) {
             lastBorderKey = borderKey;
-            int borderAccent = hasAlert ? Color.parseColor("#F43F5E") : Color.parseColor("#F59E0B");
+            int borderAccent = hasAlert
+                    ? Color.parseColor("#F43F5E")
+                    : (hasLabels ? Color.parseColor("#F59E0B") : Color.parseColor("#38BDF8"));
             GradientDrawable hlBg = new GradientDrawable();
             hlBg.setColor(Color.TRANSPARENT);
             hlBg.setCornerRadius(s(14));
@@ -353,8 +361,10 @@ public class FrigatePipOverlayView {
     }
 
     private void startLiveStream() {
-        boolean muted = config == null || !config.isPipEnableAudio();
-        webStreamController.startLiveMse(cameraName, streamSessionId, muted);
+        boolean enableAudio = (audioOverride != null)
+                ? audioOverride
+                : (config != null && config.isPipEnableAudio());
+        webStreamController.startLiveMse(cameraName, streamSessionId, !enableAudio);
     }
 
     private void startMjpegFallback() {

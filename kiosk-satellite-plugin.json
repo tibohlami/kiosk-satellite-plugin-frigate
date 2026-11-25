@@ -280,6 +280,14 @@
     {
       "id": "hidePlayer",
       "title": "Close Camera Player"
+    },
+    {
+      "id": "showCameraPipOverlay",
+      "title": "Show Camera PiP Overlay"
+    },
+    {
+      "id": "hideCameraPipOverlay",
+      "title": "Hide Camera PiP Overlay"
     }
   ]
 }
