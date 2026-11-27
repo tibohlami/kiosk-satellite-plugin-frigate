@@ -95,6 +95,7 @@ Open **Settings > Plugin Manager > Frigate NVR Explorer > Settings** in Kiosk Sa
 | :--- | :--- | :--- | :--- |
 | **Highlight cameras with active events** | `highlightOngoingEvents` | `true` | Highlights camera cards with an alert border and badge when an event or detection is actively in progress. |
 | **Show latest events on main screen** | `showLatestEvents` | `true` | Displays the Latest Events horizontal strip above the cameras grid on the main screen. |
+| **Event severity** | `latestEventsSeverity` | `Alerts & detections` | Show `Alerts only` or `Alerts & detections` in the Latest Events strip. |
 
 ### Events
 | Setting | Key | Default | Description |

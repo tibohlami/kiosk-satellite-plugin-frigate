@@ -764,11 +764,18 @@ public class FrigateExplorerOverlay {
         }
     }
 
-    public void onShowLatestEventsChanged() {
+    private String latestEventsSeverity() {
+        return config == null ? "all" : config.getLatestEventsSeverity();
+    }
+
+    public void onLatestEventsSettingsChanged() {
         mainHandler.post(() -> {
             if (isDestroyed) return;
             updateLatestEventsSectionVisibility();
             if (shouldShowLatestEvents()) {
+                // Drop cards from the previous filter so a failed reload cannot leave them up
+                loadedEvents.clear();
+                renderRecentEvents();
                 loadEvents(false);
             }
             if (homeScrollView != null) {
@@ -822,13 +829,19 @@ public class FrigateExplorerOverlay {
             statusTextView.setText(tr("explorer_loading_events"));
         }
 
-        apiClient.fetchRecentEventsEnriched(30, new FrigateApiClient.Callback<List<FrigateEvent>>() {
+        final String severity = latestEventsSeverity();
+        apiClient.fetchRecentEventsEnriched(30, severity, new FrigateApiClient.Callback<List<FrigateEvent>>() {
             @Override
             public void onSuccess(List<FrigateEvent> events) {
                 mainHandler.post(() -> {
                     eventsRefreshInFlight = false;
                     stopRefreshSpinner();
                     if (isDestroyed) return;
+                    // The setting changed while this request was in flight
+                    if (!severity.equals(latestEventsSeverity())) {
+                        loadEvents(silent);
+                        return;
+                    }
                     statusTextView.setVisibility(View.GONE);
                     if (haveEventsChanged(loadedEvents, events)) {
                         loadedEvents.clear();
@@ -846,6 +859,10 @@ public class FrigateExplorerOverlay {
                     eventsRefreshInFlight = false;
                     stopRefreshSpinner();
                     if (isDestroyed) return;
+                    if (!severity.equals(latestEventsSeverity())) {
+                        loadEvents(silent);
+                        return;
+                    }
                     if (!silent && loadedEvents.isEmpty()) {
                         statusTextView.setVisibility(View.VISIBLE);
                         statusTextView.setText(tr("explorer_error_loading", error.getMessage()));

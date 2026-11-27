@@ -25,6 +25,7 @@ public class FrigateConfig {
     public static final String KEY_LEGACY_UI_SCALE = "uiScale";
     public static final String KEY_SHOW_STREAM_MODE_PILL = "showStreamModePill";
     public static final String KEY_SHOW_LATEST_EVENTS = "showLatestEvents";
+    public static final String KEY_LATEST_EVENTS_SEVERITY = "latestEventsSeverity";
     public static final String KEY_PREVIEW_CLIPS_ON_SELECTION = "previewClipsOnSelection";
     public static final String KEY_HIGHLIGHT_ONGOING_EVENTS = "highlightOngoingEvents";
     public static final String KEY_SHOW_OBJECT_BOXES_BY_DEFAULT = "showObjectBoxesByDefault";
@@ -188,6 +189,12 @@ public class FrigateConfig {
 
     public synchronized boolean isShowLatestEvents() {
         return getBooleanSetting(KEY_SHOW_LATEST_EVENTS, DEFAULT_SHOW_LATEST_EVENTS);
+    }
+
+    /** Severity shown in the main screen's Latest Events strip: {@code "alerts"} or {@code "all"}. */
+    public synchronized String getLatestEventsSeverity() {
+        String raw = getStringSetting(KEY_LATEST_EVENTS_SEVERITY, "Alerts & detections").toLowerCase(Locale.ROOT);
+        return ("alerts".equals(raw) || "alerts only".equals(raw)) ? "alerts" : "all";
     }
 
     public synchronized boolean isPreviewClipsOnSelection() {

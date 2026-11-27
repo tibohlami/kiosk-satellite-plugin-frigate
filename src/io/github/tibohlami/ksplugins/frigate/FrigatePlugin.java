@@ -184,19 +184,21 @@ public final class FrigatePlugin implements KioskPlugin {
         if (settings == null) return;
         boolean uiScaleChanged = false;
         boolean pillChanged = false;
-        boolean showLatestEventsChanged = false;
+        boolean latestEventsChanged = false;
         boolean languageChanged = false;
         if (config != null) {
             float prevScale = config.getUiScale();
             boolean prevPill = config.isShowStreamModePill();
             boolean prevShowLatestEvents = config.isShowLatestEvents();
+            String prevLatestEventsSeverity = config.getLatestEventsSeverity();
             String prevLanguage = config.getLanguage();
             // Mirror host settings in memory without calling host.saveSettings(),
             // which would overwrite/drop host-persisted keys.
             config.updateFrom(settings);
             uiScaleChanged = Math.abs(config.getUiScale() - prevScale) > 0.001f;
             pillChanged = (config.isShowStreamModePill() != prevPill);
-            showLatestEventsChanged = (config.isShowLatestEvents() != prevShowLatestEvents);
+            latestEventsChanged = (config.isShowLatestEvents() != prevShowLatestEvents)
+                    || !config.getLatestEventsSeverity().equals(prevLatestEventsSeverity);
             languageChanged = !config.getLanguage().equals(prevLanguage);
             if (imageLoader != null) {
                 imageLoader.setConfig(config);
@@ -226,10 +228,10 @@ public final class FrigatePlugin implements KioskPlugin {
                 showPlayerModal(lastPlayerEvent);
             }
         } else {
-            if (showLatestEventsChanged && isExplorerOpen
+            if (latestEventsChanged && isExplorerOpen
                     && activeExplorerOverlay != null && !activeExplorerOverlay.isDestroyed()) {
                 final FrigateExplorerOverlay exp = activeExplorerOverlay;
-                runOnMainThread(exp::onShowLatestEventsChanged);
+                runOnMainThread(exp::onLatestEventsSettingsChanged);
             }
             if (pillChanged && isPlayerOpen && lastPlayerEvent != null) {
                 showPlayerModal(lastPlayerEvent);
