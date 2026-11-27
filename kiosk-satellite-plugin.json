@@ -106,6 +106,18 @@
       "description": "Display the Latest Events horizontal strip above the cameras grid on the main screen"
     },
     {
+      "key": "latestEventsSeverity",
+      "group": "Main screen",
+      "type": "select",
+      "title": "Event severity",
+      "default": "Alerts & detections",
+      "options": [
+        "Alerts only",
+        "Alerts & detections"
+      ],
+      "description": "Which Frigate review items the Latest Events strip shows"
+    },
+    {
       "key": "previewClipsOnSelection",
       "group": "Events",
       "type": "boolean",
