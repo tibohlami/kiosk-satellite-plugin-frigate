@@ -400,9 +400,13 @@ public class FrigateApiClient {
      * Fetches the most recent aggregated review items from Frigate 0.14+ /api/review
      * (matching Frigate's /review UI), falling back to /api/events on older servers.
      */
-    public void fetchRecentEventsEnriched(int limit, Callback<List<FrigateEvent>> callback) {
+    public void fetchRecentEventsEnriched(int limit, String severity,
+                                          Callback<List<FrigateEvent>> callback) {
         if (isShutdown || executor.isShutdown()) return;
-        fetchReviewSegmentsFiltered(null, null, null, 0L, 0L, limit, new Callback<List<ReviewSegment>>() {
+        // Frigate's review API takes the singular "alert"; the plugin setting value is "alerts"
+        final boolean alertsOnly = "alerts".equals(severity);
+        fetchReviewSegmentsFiltered(null, null, alertsOnly ? "alert" : null, 0L, 0L, limit,
+                new Callback<List<ReviewSegment>>() {
             @Override
             public void onSuccess(List<ReviewSegment> reviews) {
                 if (isShutdown) return;
@@ -417,12 +421,21 @@ public class FrigateApiClient {
                     callback.onSuccess(aggregated);
                     return;
                 }
+                // /api/events has no severity, so falling back would bring detections back
+                if (alertsOnly) {
+                    callback.onSuccess(Collections.emptyList());
+                    return;
+                }
                 fetchRecentEventsLegacyFallback(limit, callback);
             }
 
             @Override
             public void onError(Exception e) {
                 if (isShutdown) return;
+                if (alertsOnly) {
+                    callback.onError(e);
+                    return;
+                }
                 fetchRecentEventsLegacyFallback(limit, callback);
             }
         });
