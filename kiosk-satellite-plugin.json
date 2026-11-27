@@ -109,13 +109,13 @@
       "key": "latestEventsSeverity",
       "group": "Main screen",
       "type": "select",
-      "title": "Event severity",
+      "title": "Latest events severity",
       "default": "Alerts & detections",
       "options": [
         "Alerts only",
         "Alerts & detections"
       ],
-      "description": "Which Frigate review items the Latest Events strip shows"
+      "description": "Filter the Latest Events strip to show alerts only, or both alerts and detections"
     },
     {
       "key": "previewClipsOnSelection",
